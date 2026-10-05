@@ -1,0 +1,61 @@
+resources:
+  jobs:
+    spiceroute_end_to_end:
+      name: spiceroute_end_to_end
+      description: >-
+        One-click SpiceRoute run (manual trigger). regenerate=true rebuilds the synthetic data and fully refreshes the
+        pipeline; regenerate=false only refreshes pipeline, semantic layer, forecasts and quality gate.
+      tags:
+        project: spiceroute
+      max_concurrent_runs: 1
+      parameters:
+        - name: catalog
+          default: ${var.catalog}
+        - name: regenerate
+          default: "false"
+      tasks:
+        - task_key: should_regenerate
+          condition_task:
+            op: EQUAL_TO
+            left: "{{job.parameters.regenerate}}"
+            right: "true"
+
+        - task_key: generate_data
+          depends_on: [{task_key: should_regenerate, outcome: "true"}]
+          run_job_task:
+            job_id: ${resources.jobs.spiceroute_generate_data.id}
+
+        - task_key: pipeline_full_refresh
+          depends_on: [{task_key: generate_data}]
+          pipeline_task:
+            pipeline_id: ${resources.pipelines.spiceroute_medallion.id}
+            full_refresh: true
+
+        - task_key: pipeline_refresh
+          depends_on: [{task_key: should_regenerate, outcome: "false"}]
+          pipeline_task:
+            pipeline_id: ${resources.pipelines.spiceroute_medallion.id}
+
+        - task_key: metric_views
+          depends_on: [{task_key: pipeline_full_refresh}, {task_key: pipeline_refresh}]
+          run_if: AT_LEAST_ONE_SUCCESS
+          sql_task:
+            warehouse_id: ${var.warehouse_id}
+            file:
+              path: ../src/04_semantic/metric_views.sql
+            parameters:
+              catalog: "{{job.parameters.catalog}}"
+
+        - task_key: forecast
+          depends_on: [{task_key: metric_views}]
+          run_job_task:
+            job_id: ${resources.jobs.spiceroute_forecast.id}
+
+        - task_key: dq_checks
+          depends_on: [{task_key: forecast}]
+          sql_task:
+            warehouse_id: ${var.warehouse_id}
+            file:
+              path: ../src/06_quality/dq_checks.sql
+            parameters:
+              catalog: "{{job.parameters.catalog}}"

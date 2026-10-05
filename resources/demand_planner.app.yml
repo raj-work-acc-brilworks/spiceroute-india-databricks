@@ -1,0 +1,16 @@
+resources:
+  apps:
+    spiceroute_demand_planner:
+      name: spiceroute-demand-planner
+      description: SpiceRoute India demand planner - forecast explorer, reorder approvals and Genie chat
+      source_code_path: ../app
+      resources:
+        - name: sql-warehouse
+          sql_warehouse:
+            id: ${var.warehouse_id}
+            permission: CAN_USE
+        - name: genie-space
+          genie_space:
+            name: Ask SpiceRoute
+            space_id: 01f1c0bd7bd6175ba0b691784fd34971
+            permission: CAN_RUN

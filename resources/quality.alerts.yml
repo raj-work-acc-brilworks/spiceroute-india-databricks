@@ -1,0 +1,49 @@
+# SQL alerts (Alerts v2). Schedules are PAUSED to protect the Free Edition compute quota;
+# the same thresholds are enforced on every manual run by the dq_checks task of spiceroute_end_to_end.
+# Unpause in the UI (or set pause_status: UNPAUSED) to get daily emails.
+resources:
+  alerts:
+    spiceroute_high_stockout_risk:
+      display_name: "SpiceRoute · DC x SKU at HIGH stockout risk > 100"
+      warehouse_id: ${var.warehouse_id}
+      query_text: "SELECT count(*) AS high_risk_items FROM ${var.catalog}.ml.reorder_recommendation WHERE stockout_risk = 'High'"
+      evaluation:
+        comparison_operator: GREATER_THAN
+        source: {name: high_risk_items, display: high_risk_items}
+        threshold: {value: {double_value: 100}}
+        notification:
+          notify_on_ok: true
+          subscriptions:
+            - user_email: ${workspace.current_user.userName}
+      schedule: {pause_status: PAUSED, quartz_cron_schedule: "0 0 8 * * ?", timezone_id: Asia/Kolkata}
+
+    spiceroute_forecast_wape:
+      display_name: "SpiceRoute · Forecast backtest WAPE > 30%"
+      warehouse_id: ${var.warehouse_id}
+      query_text: "SELECT sum(abs(actual - forecast_units)) / sum(actual) AS wape FROM ${var.catalog}.ml.forecast_backtest"
+      evaluation:
+        comparison_operator: GREATER_THAN
+        source: {name: wape, display: wape}
+        threshold: {value: {double_value: 0.30}}
+        notification:
+          notify_on_ok: true
+          subscriptions:
+            - user_email: ${workspace.current_user.userName}
+      schedule: {pause_status: PAUSED, quartz_cron_schedule: "0 0 8 ? * MON", timezone_id: Asia/Kolkata}
+
+    spiceroute_dq_reject_rate:
+      display_name: "SpiceRoute · Sales-line DQ reject rate > 1%"
+      warehouse_id: ${var.warehouse_id}
+      query_text: >-
+        SELECT (SELECT sum(rows) FROM ${var.catalog}.gold.dq_summary
+                WHERE source_table = 'sales_lines' AND dq_reason NOT LIKE '%accepted%')
+               / (SELECT count(*) FROM ${var.catalog}.bronze.sales_lines_raw) AS reject_rate
+      evaluation:
+        comparison_operator: GREATER_THAN
+        source: {name: reject_rate, display: reject_rate}
+        threshold: {value: {double_value: 0.01}}
+        notification:
+          notify_on_ok: true
+          subscriptions:
+            - user_email: ${workspace.current_user.userName}
+      schedule: {pause_status: PAUSED, quartz_cron_schedule: "0 30 8 * * ?", timezone_id: Asia/Kolkata}
