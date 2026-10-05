@@ -26,7 +26,7 @@ The project covers:
 | 4a | `ai_forecast()` baseline | ✅ Done | `ml.ai_forecast_baseline`: 882 series × 12 weeks |
 | 4b | Prophet forecast + backtest + MLflow | 🔄 Re-running | First run failed on a library conflict (`cmdstanpy` 1.3 vs the CmdStan bundled with Prophet). Fixed by pinning `cmdstanpy==1.2.5` |
 | 4c | Reorder recommendations | ⏳ Waits on 4b | `ml.reorder_recommendation`, plus the `ml.reorder_overrides` table for the app |
-| 5 | AI/BI dashboard (6 pages) | ⏳ To do | "SpiceRoute Commercial Command Center" |
+| 5 | AI/BI dashboard (6 pages) | 🟡 Built, not deployed | `dashboards/build_dashboard.py` generates the JSON (16 datasets, 6 pages + filters). 12 gold datasets pass `--test`. The 4 ML datasets are waiting on the forecast tables |
 | 6 | Genie space "Ask SpiceRoute" | ⏳ To do | Instructions, trusted SQL, benchmark questions |
 | 7 | Data quality monitoring | 🟡 Partly done | Pipeline expectations and quarantine tables plus `gold.dq_summary` are done. SQL alerts and the Data Health dashboard page are still to do |
 | 8 | Databricks App "Demand Planner" | ⏳ To do | Python (Streamlit) app: forecast explorer, reorder approvals, Genie chat |
@@ -36,7 +36,7 @@ The project covers:
 ### Remaining work, in order
 1. Finish the Prophet run (fix applied, now re-running), then check WAPE against the seasonal-naive baseline and confirm the MLflow run.
 2. Build the reorder recommendations and check the stockout-risk distribution.
-3. Build the dashboard JSON, test every dataset SQL query through the CLI, deploy it via the bundle and publish it.
+3. Rerun `python3 dashboards/build_dashboard.py --test` once the ML tables exist, add `resources/dashboard.dashboard.yml` (dataset_catalog `spiceroute`, dataset_schema `gold`), then deploy and publish.
 4. Create the Genie space on the gold tables and metric views, with instructions, sample questions and trusted SQL. Then link it to the dashboard.
 5. Add SQL alerts: high stockout risk, forecast WAPE above 25%, DQ drop rate above 1%.
 6. Build and deploy the Demand Planner app as a bundle resource, and grant its service principal access.

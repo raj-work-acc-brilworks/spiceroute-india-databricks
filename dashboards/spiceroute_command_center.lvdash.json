@@ -1,0 +1,3997 @@
+{
+ "datasets": [
+  {
+   "name": "ds_sales",
+   "displayName": "Sales (day x zone x channel x spice)",
+   "queryLines": [
+    "SELECT a.order_date, d.fiscal_year, d.month_start, d.season, a.zone, a.channel_name, a.channel_group, a.category, a.base_spice,\n",
+    "       SUM(a.net_revenue_inr) AS net_revenue_inr, SUM(a.gross_margin_inr) AS gross_margin_inr, SUM(a.units) AS units,\n",
+    "       SUM(a.volume_kg) AS volume_kg, SUM(a.discount_inr) AS discount_inr, SUM(a.promo_revenue_inr) AS promo_revenue_inr,\n",
+    "       SUM(a.lines) AS lines, SUM(a.returned_lines) AS returned_lines\n",
+    "FROM agg_sales_daily a JOIN dim_date d ON a.order_date = d.date\n",
+    "GROUP BY ALL\n"
+   ],
+   "columns": [
+    {
+     "displayName": "Net Revenue",
+     "expression": "SUM(`net_revenue_inr`)"
+    },
+    {
+     "displayName": "Gross Margin %",
+     "expression": "SUM(`gross_margin_inr`) / SUM(`net_revenue_inr`)"
+    },
+    {
+     "displayName": "Volume Tonnes",
+     "expression": "SUM(`volume_kg`) / 1000"
+    },
+    {
+     "displayName": "Promo Share",
+     "expression": "SUM(`promo_revenue_inr`) / SUM(`net_revenue_inr`)"
+    },
+    {
+     "displayName": "Return Rate",
+     "expression": "SUM(`returned_lines`) / SUM(`lines`)"
+    }
+   ]
+  },
+  {
+   "name": "ds_orders",
+   "displayName": "Orders (day x zone x channel)",
+   "queryLines": [
+    "SELECT o.order_date, o.zone, c.channel_name, c.channel_group, COUNT(*) AS orders, SUM(o.net_revenue_inr) AS net_revenue_inr\n",
+    "FROM fact_orders o JOIN dim_channel c ON o.channel_code = c.channel_code\n",
+    "WHERE o.order_status = 'Delivered'\n",
+    "GROUP BY ALL\n"
+   ],
+   "columns": [
+    {
+     "displayName": "Orders",
+     "expression": "SUM(`orders`)"
+    },
+    {
+     "displayName": "AOV",
+     "expression": "SUM(`net_revenue_inr`) / SUM(`orders`)"
+    }
+   ]
+  },
+  {
+   "name": "ds_state_map",
+   "displayName": "Revenue by state (monthly)",
+   "queryLines": [
+    "SELECT m.month AS order_date, m.state, m.zone, c.channel_name, m.category, g.lat, g.lon, SUM(m.net_revenue_inr) AS net_revenue_inr,\n",
+    "       SUM(m.gross_margin_inr) AS gross_margin_inr\n",
+    "FROM agg_sales_monthly m\n",
+    "JOIN dim_channel c ON m.channel_code = c.channel_code\n",
+    "JOIN (SELECT state, AVG(lat) AS lat, AVG(lon) AS lon FROM dim_geography GROUP BY state) g ON m.state = g.state\n",
+    "GROUP BY ALL\n"
+   ]
+  },
+  {
+   "name": "ds_festival",
+   "displayName": "Festival uplift",
+   "queryLines": [
+    "SELECT festival_name, festival_date, year, zone, base_spice, category, festival_daily_revenue_inr, baseline_daily_revenue_inr,\n",
+    "       uplift_pct / 100.0 AS uplift\n",
+    "FROM agg_festival_uplift\n",
+    "WHERE baseline_daily_revenue_inr > 20000\n"
+   ]
+  },
+  {
+   "name": "ds_festival_daily",
+   "displayName": "Daily revenue around festivals",
+   "queryLines": [
+    "SELECT a.order_date, a.zone, SUM(a.net_revenue_inr) AS net_revenue_inr\n",
+    "FROM agg_sales_daily a\n",
+    "WHERE a.order_date >= DATE'2024-08-01' AND a.order_date <= DATE'2025-11-30'\n",
+    "GROUP BY ALL\n"
+   ]
+  },
+  {
+   "name": "ds_promo",
+   "displayName": "Promotion effectiveness",
+   "queryLines": [
+    "SELECT p.promo_code, p.promo_name, p.promo_type, c.channel_name, p.category_scope, p.festival_name, p.discount_pct, p.start_date,\n",
+    "       p.promo_daily_revenue_inr, p.baseline_daily_revenue_inr, p.discount_cost_inr, p.revenue_lift_pct / 100.0 AS revenue_lift\n",
+    "FROM agg_promo_effectiveness p JOIN dim_channel c ON p.channel_code = c.channel_code\n",
+    "WHERE p.baseline_daily_revenue_inr IS NOT NULL\n"
+   ]
+  },
+  {
+   "name": "ds_forecast",
+   "displayName": "Actuals + 12-week Prophet forecast (week x zone x category)",
+   "queryLines": [
+    "WITH act AS (\n",
+    "  SELECT w.week_start, w.zone, p.category, SUM(w.units) AS actual_units\n",
+    "  FROM agg_sales_weekly_sku_zone w JOIN dim_product p ON w.sku_id = p.sku_id\n",
+    "  WHERE w.week_start BETWEEN DATE'2024-10-07' AND DATE'2026-09-21' GROUP BY ALL),\n",
+    "fc AS (\n",
+    "  SELECT f.week_start, f.zone, p.category, SUM(f.forecast_units) AS forecast_units, SUM(f.forecast_lower) AS forecast_lower,\n",
+    "         SUM(f.forecast_upper) AS forecast_upper\n",
+    "  FROM ml.demand_forecast f JOIN dim_product p ON f.sku_id = p.sku_id GROUP BY ALL)\n",
+    "SELECT week_start, zone, category, actual_units, CAST(NULL AS DOUBLE) AS forecast_units, CAST(NULL AS DOUBLE) AS forecast_lower,\n",
+    "       CAST(NULL AS DOUBLE) AS forecast_upper FROM act\n",
+    "UNION ALL\n",
+    "SELECT week_start, zone, category, actual_units, actual_units, actual_units, actual_units FROM act WHERE week_start = DATE'2026-09-21'\n",
+    "UNION ALL\n",
+    "SELECT week_start, zone, category, CAST(NULL AS DOUBLE), forecast_units, forecast_lower, forecast_upper FROM fc\n"
+   ]
+  },
+  {
+   "name": "ds_model_compare",
+   "displayName": "Next 12 weeks: Prophet vs ai_forecast vs seasonal naive",
+   "queryLines": [
+    "SELECT f.week_start, f.zone, p.category, SUM(f.forecast_units) AS prophet_units, SUM(f.seasonal_naive_units) AS seasonal_naive_units,\n",
+    "       SUM(a.forecast_units) AS ai_forecast_units\n",
+    "FROM ml.demand_forecast f\n",
+    "JOIN dim_product p ON f.sku_id = p.sku_id\n",
+    "LEFT JOIN ml.ai_forecast_baseline a ON a.sku_id = f.sku_id AND a.zone = f.zone AND a.week_start = f.week_start\n",
+    "GROUP BY ALL\n"
+   ]
+  },
+  {
+   "name": "ds_accuracy",
+   "displayName": "Backtest accuracy (per series)",
+   "queryLines": [
+    "SELECT sku_id, zone, category, base_spice, model, actual_units, wape_prophet, wape_seasonal_naive, bias_prophet, interval_coverage,\n",
+    "       wape_prophet * actual_units AS abs_err_prophet, wape_seasonal_naive * actual_units AS abs_err_snaive\n",
+    "FROM ml.forecast_accuracy WHERE actual_units > 0\n"
+   ],
+   "columns": [
+    {
+     "displayName": "WAPE Prophet",
+     "expression": "SUM(`abs_err_prophet`) / SUM(`actual_units`)"
+    },
+    {
+     "displayName": "WAPE Seasonal Naive",
+     "expression": "SUM(`abs_err_snaive`) / SUM(`actual_units`)"
+    }
+   ]
+  },
+  {
+   "name": "ds_reorder",
+   "displayName": "Reorder recommendations",
+   "queryLines": [
+    "SELECT warehouse_name, w.zone, r.sku_id, product_name, base_spice, category, on_hand_units, open_po_units, forecast_next_4w_units,\n",
+    "       weeks_of_cover, lead_time_weeks, safety_stock_units, recommended_order_units, stockout_risk, projected_stockout_date,\n",
+    "       forecast_revenue_4w_inr\n",
+    "FROM ml.reorder_recommendation r JOIN dim_warehouse w ON r.warehouse_id = w.warehouse_id\n"
+   ]
+  },
+  {
+   "name": "ds_inventory",
+   "displayName": "Inventory service level (week x warehouse x spice)",
+   "queryLines": [
+    "SELECT i.week_start, w.warehouse_name, w.zone, i.base_spice, i.category,\n",
+    "       CASE WHEN i.base_spice LIKE '%Chilli%' THEN 'Chilli' ELSE 'Other spices' END AS spice_group,\n",
+    "       SUM(i.demand_units) AS demand_units, SUM(i.shipped_units) AS shipped_units, SUM(i.stockout_days) AS stockout_days,\n",
+    "       SUM(i.closing_stock_value_inr) AS stock_value_inr\n",
+    "FROM agg_inventory_weekly i JOIN dim_warehouse w ON i.warehouse_id = w.warehouse_id\n",
+    "GROUP BY ALL\n"
+   ],
+   "columns": [
+    {
+     "displayName": "Fill Rate",
+     "expression": "SUM(`shipped_units`) / SUM(`demand_units`)"
+    }
+   ]
+  },
+  {
+   "name": "ds_margin",
+   "displayName": "Raw material vs margin (month x spice group)",
+   "queryLines": [
+    "SELECT month, CASE WHEN base_spice_code IN ('RCH', 'KCH') THEN 'Chilli' ELSE 'Other spices' END AS spice_group,\n",
+    "       SUM(net_revenue_inr) AS net_revenue_inr, SUM(gross_margin_inr) AS gross_margin_inr,\n",
+    "       AVG(raw_material_index) AS raw_material_index\n",
+    "FROM agg_margin_monthly GROUP BY ALL\n"
+   ],
+   "columns": [
+    {
+     "displayName": "GM %",
+     "expression": "SUM(`gross_margin_inr`) / SUM(`net_revenue_inr`)"
+    }
+   ]
+  },
+  {
+   "name": "ds_supplier",
+   "displayName": "Supplier performance",
+   "queryLines": [
+    "SELECT supplier_name, supplier_tier, base_spice, quality_grade, COUNT(*) AS pos, SUM(po_value_inr) AS po_value_inr,\n",
+    "       AVG(fill_rate) AS avg_fill_rate, AVG(delay_days) AS avg_delay_days\n",
+    "FROM fact_purchase_orders GROUP BY ALL\n"
+   ]
+  },
+  {
+   "name": "ds_rfm",
+   "displayName": "Customer RFM segments",
+   "queryLines": [
+    "SELECT rfm_segment, zone, loyalty_tier, COUNT(*) AS customers, SUM(monetary_inr) AS monetary_inr, AVG(frequency) AS avg_orders,\n",
+    "       AVG(recency_days) AS avg_recency_days\n",
+    "FROM agg_customer_rfm GROUP BY ALL\n"
+   ]
+  },
+  {
+   "name": "ds_dq",
+   "displayName": "Data quality summary",
+   "queryLines": [
+    "SELECT source_table, dq_reason, rows,\n",
+    "       CASE WHEN dq_reason LIKE '%accepted%' THEN 'Accepted (flagged)' ELSE 'Rejected (quarantined)' END AS outcome\n",
+    "FROM dq_summary\n"
+   ]
+  },
+  {
+   "name": "ds_layers",
+   "displayName": "Row counts by layer",
+   "queryLines": [
+    "SELECT 'Bronze raw lines' AS layer, 1 AS ord, COUNT(*) AS rows FROM bronze.sales_lines_raw\n",
+    "UNION ALL SELECT 'Silver clean lines', 2, COUNT(*) FROM silver.sales_lines\n",
+    "UNION ALL SELECT 'Gold fact lines', 3, COUNT(*) FROM fact_sales_line\n",
+    "UNION ALL SELECT 'Gold orders', 4, COUNT(*) FROM fact_orders\n"
+   ]
+  }
+ ],
+ "pages": [
+  {
+   "name": "overview",
+   "displayName": "1 \u00b7 Executive Overview",
+   "pageType": "PAGE_TYPE_CANVAS",
+   "layoutVersion": "GRID_V1",
+   "layout": [
+    {
+     "widget": {
+      "name": "text-1",
+      "multilineTextboxSpec": {
+       "lines": [
+        "# \ud83c\udf36\ufe0f SpiceRoute India \u2014 Commercial Command Center\nNet revenue is **excluding GST**, after channel margin and promotional discounts; delivered orders only. Indian fiscal year runs April\u2013March. Use the **Filters** page to slice every page by date, zone, channel and category."
+       ]
+      }
+     },
+     "position": {
+      "x": 0,
+      "y": 0,
+      "width": 12,
+      "height": 2
+     }
+    },
+    {
+     "widget": {
+      "name": "kpi-2",
+      "queries": [
+       {
+        "name": "main_query",
+        "query": {
+         "datasetName": "ds_sales",
+         "fields": [
+          {
+           "name": "measure(Net Revenue)",
+           "expression": "MEASURE(`Net Revenue`)"
+          },
+          {
+           "name": "monthly(order_date)",
+           "expression": "DATE_TRUNC(\"MONTH\", `order_date`)"
+          }
+         ],
+         "disaggregated": false
+        }
+       }
+      ],
+      "spec": {
+       "version": 2,
+       "widgetType": "counter",
+       "encodings": {
+        "value": {
+         "fieldName": "measure(Net Revenue)",
+         "displayName": "Net Revenue",
+         "format": {
+          "type": "number-currency",
+          "currencyCode": "INR",
+          "abbreviation": "compact",
+          "decimalPlaces": {
+           "type": "max",
+           "places": 1
+          }
+         }
+        },
+        "period": {
+         "fieldName": "monthly(order_date)"
+        }
+       },
+       "frame": {
+        "title": "Net Revenue",
+        "showTitle": true
+       }
+      }
+     },
+     "position": {
+      "x": 0,
+      "y": 2,
+      "width": 3,
+      "height": 3
+     }
+    },
+    {
+     "widget": {
+      "name": "kpi-3",
+      "queries": [
+       {
+        "name": "main_query",
+        "query": {
+         "datasetName": "ds_sales",
+         "fields": [
+          {
+           "name": "measure(Gross Margin %)",
+           "expression": "MEASURE(`Gross Margin %`)"
+          },
+          {
+           "name": "monthly(order_date)",
+           "expression": "DATE_TRUNC(\"MONTH\", `order_date`)"
+          }
+         ],
+         "disaggregated": false
+        }
+       }
+      ],
+      "spec": {
+       "version": 2,
+       "widgetType": "counter",
+       "encodings": {
+        "value": {
+         "fieldName": "measure(Gross Margin %)",
+         "displayName": "Gross Margin %",
+         "format": {
+          "type": "number-percent",
+          "decimalPlaces": {
+           "type": "max",
+           "places": 1
+          }
+         }
+        },
+        "period": {
+         "fieldName": "monthly(order_date)"
+        }
+       },
+       "frame": {
+        "title": "Gross Margin %",
+        "showTitle": true
+       }
+      }
+     },
+     "position": {
+      "x": 3,
+      "y": 2,
+      "width": 3,
+      "height": 3
+     }
+    },
+    {
+     "widget": {
+      "name": "kpi-4",
+      "queries": [
+       {
+        "name": "main_query",
+        "query": {
+         "datasetName": "ds_orders",
+         "fields": [
+          {
+           "name": "measure(Orders)",
+           "expression": "MEASURE(`Orders`)"
+          },
+          {
+           "name": "monthly(order_date)",
+           "expression": "DATE_TRUNC(\"MONTH\", `order_date`)"
+          }
+         ],
+         "disaggregated": false
+        }
+       }
+      ],
+      "spec": {
+       "version": 2,
+       "widgetType": "counter",
+       "encodings": {
+        "value": {
+         "fieldName": "measure(Orders)",
+         "displayName": "Orders",
+         "format": {
+          "type": "number",
+          "abbreviation": "compact",
+          "decimalPlaces": {
+           "type": "max",
+           "places": 1
+          }
+         }
+        },
+        "period": {
+         "fieldName": "monthly(order_date)"
+        }
+       },
+       "frame": {
+        "title": "Orders",
+        "showTitle": true
+       }
+      }
+     },
+     "position": {
+      "x": 6,
+      "y": 2,
+      "width": 3,
+      "height": 3
+     }
+    },
+    {
+     "widget": {
+      "name": "kpi-5",
+      "queries": [
+       {
+        "name": "main_query",
+        "query": {
+         "datasetName": "ds_orders",
+         "fields": [
+          {
+           "name": "measure(AOV)",
+           "expression": "MEASURE(`AOV`)"
+          },
+          {
+           "name": "monthly(order_date)",
+           "expression": "DATE_TRUNC(\"MONTH\", `order_date`)"
+          }
+         ],
+         "disaggregated": false
+        }
+       }
+      ],
+      "spec": {
+       "version": 2,
+       "widgetType": "counter",
+       "encodings": {
+        "value": {
+         "fieldName": "measure(AOV)",
+         "displayName": "Avg Order Value",
+         "format": {
+          "type": "number-currency",
+          "currencyCode": "INR",
+          "decimalPlaces": {
+           "type": "max",
+           "places": 0
+          }
+         }
+        },
+        "period": {
+         "fieldName": "monthly(order_date)"
+        }
+       },
+       "frame": {
+        "title": "Avg Order Value",
+        "showTitle": true
+       }
+      }
+     },
+     "position": {
+      "x": 9,
+      "y": 2,
+      "width": 3,
+      "height": 3
+     }
+    },
+    {
+     "widget": {
+      "name": "bar-6",
+      "queries": [
+       {
+        "name": "main_query",
+        "query": {
+         "datasetName": "ds_sales",
+         "fields": [
+          {
+           "name": "monthly(order_date)",
+           "expression": "DATE_TRUNC(\"MONTH\", `order_date`)"
+          },
+          {
+           "name": "sum(net_revenue_inr)",
+           "expression": "SUM(`net_revenue_inr`)"
+          },
+          {
+           "name": "channel_group",
+           "expression": "`channel_group`"
+          }
+         ],
+         "disaggregated": false
+        }
+       }
+      ],
+      "spec": {
+       "version": 3,
+       "widgetType": "bar",
+       "encodings": {
+        "x": {
+         "fieldName": "monthly(order_date)",
+         "scale": {
+          "type": "temporal"
+         },
+         "displayName": "Month"
+        },
+        "y": {
+         "fieldName": "sum(net_revenue_inr)",
+         "scale": {
+          "type": "quantitative"
+         },
+         "displayName": "Net revenue",
+         "format": {
+          "type": "number-currency",
+          "currencyCode": "INR",
+          "abbreviation": "compact",
+          "decimalPlaces": {
+           "type": "max",
+           "places": 1
+          }
+         }
+        },
+        "color": {
+         "fieldName": "channel_group",
+         "scale": {
+          "type": "categorical",
+          "mappings": [
+           {
+            "value": "Offline",
+            "color": "#264653"
+           },
+           {
+            "value": "Online",
+            "color": "#E76F51"
+           },
+           {
+            "value": "B2B",
+            "color": "#E9C46A"
+           }
+          ]
+         },
+         "displayName": "Channel group"
+        }
+       },
+       "frame": {
+        "title": "Monthly net revenue by channel group",
+        "showTitle": true
+       },
+       "annotations": [
+        {
+         "type": "vertical-line",
+         "encodings": {
+          "x": {
+           "dataValue": "2024-11-01T00:00:00.000",
+           "dataType": "DATETIME"
+          },
+          "label": {
+           "value": "Diwali 2024"
+          },
+          "color": {
+           "value": {
+            "hex": "#6A4C93"
+           }
+          }
+         }
+        },
+        {
+         "type": "vertical-line",
+         "encodings": {
+          "x": {
+           "dataValue": "2025-10-20T00:00:00.000",
+           "dataType": "DATETIME"
+          },
+          "label": {
+           "value": "Diwali 2025"
+          },
+          "color": {
+           "value": {
+            "hex": "#6A4C93"
+           }
+          }
+         }
+        }
+       ]
+      }
+     },
+     "position": {
+      "x": 0,
+      "y": 5,
+      "width": 8,
+      "height": 6
+     }
+    },
+    {
+     "widget": {
+      "name": "pie-7",
+      "queries": [
+       {
+        "name": "main_query",
+        "query": {
+         "datasetName": "ds_sales",
+         "fields": [
+          {
+           "name": "sum(net_revenue_inr)",
+           "expression": "SUM(`net_revenue_inr`)"
+          },
+          {
+           "name": "channel_name",
+           "expression": "`channel_name`"
+          }
+         ],
+         "disaggregated": false
+        }
+       }
+      ],
+      "spec": {
+       "version": 3,
+       "widgetType": "pie",
+       "frame": {
+        "title": "Channel mix",
+        "showTitle": true
+       },
+       "encodings": {
+        "angle": {
+         "fieldName": "sum(net_revenue_inr)",
+         "scale": {
+          "type": "quantitative"
+         },
+         "displayName": "Net revenue",
+         "format": {
+          "type": "number-currency",
+          "currencyCode": "INR",
+          "abbreviation": "compact",
+          "decimalPlaces": {
+           "type": "max",
+           "places": 1
+          }
+         }
+        },
+        "color": {
+         "fieldName": "channel_name",
+         "scale": {
+          "type": "categorical"
+         },
+         "displayName": "Channel"
+        },
+        "label": {
+         "show": true
+        }
+       }
+      }
+     },
+     "position": {
+      "x": 8,
+      "y": 5,
+      "width": 4,
+      "height": 6
+     }
+    },
+    {
+     "widget": {
+      "name": "bar-8",
+      "queries": [
+       {
+        "name": "main_query",
+        "query": {
+         "datasetName": "ds_sales",
+         "fields": [
+          {
+           "name": "zone",
+           "expression": "`zone`"
+          },
+          {
+           "name": "sum(net_revenue_inr)",
+           "expression": "SUM(`net_revenue_inr`)"
+          }
+         ],
+         "disaggregated": false,
+         "orders": [
+          {
+           "direction": "DESC",
+           "expression": "SUM(`net_revenue_inr`)"
+          }
+         ]
+        }
+       }
+      ],
+      "spec": {
+       "version": 3,
+       "widgetType": "bar",
+       "encodings": {
+        "x": {
+         "fieldName": "zone",
+         "scale": {
+          "type": "categorical"
+         },
+         "displayName": "Zone"
+        },
+        "y": {
+         "fieldName": "sum(net_revenue_inr)",
+         "scale": {
+          "type": "quantitative"
+         },
+         "displayName": "Net revenue",
+         "format": {
+          "type": "number-currency",
+          "currencyCode": "INR",
+          "abbreviation": "compact",
+          "decimalPlaces": {
+           "type": "max",
+           "places": 1
+          }
+         }
+        }
+       },
+       "frame": {
+        "title": "Net revenue by zone",
+        "showTitle": true
+       }
+      }
+     },
+     "position": {
+      "x": 0,
+      "y": 11,
+      "width": 4,
+      "height": 6
+     }
+    },
+    {
+     "widget": {
+      "name": "bar-9",
+      "queries": [
+       {
+        "name": "main_query",
+        "query": {
+         "datasetName": "ds_sales",
+         "fields": [
+          {
+           "name": "base_spice",
+           "expression": "`base_spice`"
+          },
+          {
+           "name": "sum(net_revenue_inr)",
+           "expression": "SUM(`net_revenue_inr`)"
+          }
+         ],
+         "disaggregated": false
+        }
+       }
+      ],
+      "spec": {
+       "version": 3,
+       "widgetType": "bar",
+       "encodings": {
+        "x": {
+         "fieldName": "sum(net_revenue_inr)",
+         "scale": {
+          "type": "quantitative"
+         },
+         "displayName": "Net revenue",
+         "format": {
+          "type": "number-currency",
+          "currencyCode": "INR",
+          "abbreviation": "compact",
+          "decimalPlaces": {
+           "type": "max",
+           "places": 1
+          }
+         }
+        },
+        "y": {
+         "fieldName": "base_spice",
+         "scale": {
+          "type": "categorical",
+          "sort": {
+           "by": "x-reversed"
+          }
+         },
+         "displayName": "Spice"
+        }
+       },
+       "frame": {
+        "title": "Top base spices by revenue",
+        "showTitle": true
+       }
+      }
+     },
+     "position": {
+      "x": 4,
+      "y": 11,
+      "width": 4,
+      "height": 6
+     }
+    },
+    {
+     "widget": {
+      "name": "line-10",
+      "queries": [
+       {
+        "name": "main_query",
+        "query": {
+         "datasetName": "ds_sales",
+         "fields": [
+          {
+           "name": "monthly(order_date)",
+           "expression": "DATE_TRUNC(\"MONTH\", `order_date`)"
+          },
+          {
+           "name": "measure(Gross Margin %)",
+           "expression": "MEASURE(`Gross Margin %`)"
+          },
+          {
+           "name": "category",
+           "expression": "`category`"
+          }
+         ],
+         "disaggregated": false
+        }
+       }
+      ],
+      "spec": {
+       "version": 3,
+       "widgetType": "line",
+       "encodings": {
+        "x": {
+         "fieldName": "monthly(order_date)",
+         "scale": {
+          "type": "temporal"
+         },
+         "displayName": "Month"
+        },
+        "y": {
+         "fieldName": "measure(Gross Margin %)",
+         "scale": {
+          "type": "quantitative"
+         },
+         "displayName": "Gross margin",
+         "format": {
+          "type": "number-percent",
+          "decimalPlaces": {
+           "type": "max",
+           "places": 1
+          }
+         }
+        },
+        "color": {
+         "fieldName": "category",
+         "scale": {
+          "type": "categorical"
+         },
+         "displayName": "Category"
+        }
+       },
+       "frame": {
+        "title": "Gross margin % by category",
+        "showTitle": true
+       }
+      }
+     },
+     "position": {
+      "x": 8,
+      "y": 11,
+      "width": 4,
+      "height": 6
+     }
+    }
+   ]
+  },
+  {
+   "name": "product_region",
+   "displayName": "2 \u00b7 Product & Region",
+   "pageType": "PAGE_TYPE_CANVAS",
+   "layoutVersion": "GRID_V1",
+   "layout": [
+    {
+     "widget": {
+      "name": "text-11",
+      "multilineTextboxSpec": {
+       "lines": [
+        "## Product & Region\nRegional taste is strong: sambar/rasam in the **South**, panch phoron in the **East**, goda masala in the **West**, garam masala in the **North**."
+       ]
+      }
+     },
+     "position": {
+      "x": 0,
+      "y": 0,
+      "width": 12,
+      "height": 1
+     }
+    },
+    {
+     "widget": {
+      "name": "heatmap-12",
+      "queries": [
+       {
+        "name": "main_query",
+        "query": {
+         "datasetName": "ds_sales",
+         "fields": [
+          {
+           "name": "zone",
+           "expression": "`zone`"
+          },
+          {
+           "name": "category",
+           "expression": "`category`"
+          },
+          {
+           "name": "sum(net_revenue_inr)",
+           "expression": "SUM(`net_revenue_inr`)"
+          }
+         ],
+         "disaggregated": false
+        }
+       }
+      ],
+      "spec": {
+       "version": 3,
+       "widgetType": "heatmap",
+       "frame": {
+        "title": "Revenue: category \u00d7 zone",
+        "showTitle": true
+       },
+       "encodings": {
+        "x": {
+         "fieldName": "zone",
+         "scale": {
+          "type": "categorical"
+         },
+         "displayName": "Zone"
+        },
+        "y": {
+         "fieldName": "category",
+         "scale": {
+          "type": "categorical"
+         },
+         "displayName": "Category"
+        },
+        "color": {
+         "fieldName": "sum(net_revenue_inr)",
+         "displayName": "Net revenue",
+         "format": {
+          "type": "number-currency",
+          "currencyCode": "INR",
+          "abbreviation": "compact",
+          "decimalPlaces": {
+           "type": "max",
+           "places": 1
+          }
+         },
+         "scale": {
+          "type": "quantitative",
+          "colorRamp": {
+           "mode": "custom-sequential",
+           "colors": {
+            "start": "#FFF3E0",
+            "end": "#B23A48"
+           }
+          }
+         }
+        },
+        "label": {
+         "show": true
+        }
+       }
+      }
+     },
+     "position": {
+      "x": 0,
+      "y": 1,
+      "width": 6,
+      "height": 6
+     }
+    },
+    {
+     "widget": {
+      "name": "map-13",
+      "queries": [
+       {
+        "name": "main_query",
+        "query": {
+         "datasetName": "ds_state_map",
+         "fields": [
+          {
+           "name": "lat",
+           "expression": "`lat`"
+          },
+          {
+           "name": "lon",
+           "expression": "`lon`"
+          },
+          {
+           "name": "state",
+           "expression": "`state`"
+          },
+          {
+           "name": "sum(net_revenue_inr)",
+           "expression": "SUM(`net_revenue_inr`)"
+          }
+         ],
+         "disaggregated": false
+        }
+       }
+      ],
+      "spec": {
+       "version": 2,
+       "widgetType": "symbol-map",
+       "frame": {
+        "title": "Revenue by state",
+        "showTitle": true
+       },
+       "mark": {
+        "opacity": 0.75
+       },
+       "encodings": {
+        "coordinates": {
+         "latitude": {
+          "fieldName": "lat"
+         },
+         "longitude": {
+          "fieldName": "lon"
+         }
+        },
+        "size": {
+         "fieldName": "sum(net_revenue_inr)",
+         "scale": {
+          "type": "quantitative"
+         },
+         "displayName": "Net revenue"
+        },
+        "color": {
+         "fieldName": "sum(net_revenue_inr)",
+         "displayName": "Net revenue",
+         "scale": {
+          "type": "quantitative",
+          "colorRamp": {
+           "mode": "custom-sequential",
+           "colors": {
+            "start": "#F4A261",
+            "end": "#9B2226"
+           }
+          }
+         }
+        }
+       }
+      }
+     },
+     "position": {
+      "x": 6,
+      "y": 1,
+      "width": 6,
+      "height": 6
+     }
+    },
+    {
+     "widget": {
+      "name": "pivot-14",
+      "queries": [
+       {
+        "name": "main_query",
+        "query": {
+         "datasetName": "ds_sales",
+         "fields": [
+          {
+           "name": "base_spice",
+           "expression": "`base_spice`"
+          },
+          {
+           "name": "zone",
+           "expression": "`zone`"
+          },
+          {
+           "name": "sum(volume_kg)",
+           "expression": "SUM(`volume_kg`)"
+          }
+         ],
+         "disaggregated": false
+        }
+       }
+      ],
+      "spec": {
+       "version": 3,
+       "widgetType": "pivot",
+       "frame": {
+        "title": "Volume (kg): spice \u00d7 zone",
+        "showTitle": true
+       },
+       "encodings": {
+        "rows": [
+         {
+          "fieldName": "base_spice",
+          "displayName": "Spice"
+         }
+        ],
+        "columns": [
+         {
+          "fieldName": "zone",
+          "displayName": "Zone"
+         }
+        ],
+        "cell": {
+         "type": "multi-cell",
+         "fields": [
+          {
+           "fieldName": "sum(volume_kg)",
+           "cellType": "text",
+           "displayName": "kg",
+           "format": {
+            "type": "number",
+            "abbreviation": "compact",
+            "decimalPlaces": {
+             "type": "max",
+             "places": 1
+            }
+           }
+          }
+         ]
+        }
+       }
+      }
+     },
+     "position": {
+      "x": 0,
+      "y": 7,
+      "width": 8,
+      "height": 8
+     }
+    },
+    {
+     "widget": {
+      "name": "bar-15",
+      "queries": [
+       {
+        "name": "main_query",
+        "query": {
+         "datasetName": "ds_sales",
+         "fields": [
+          {
+           "name": "season",
+           "expression": "`season`"
+          },
+          {
+           "name": "sum(volume_kg)",
+           "expression": "SUM(`volume_kg`)"
+          },
+          {
+           "name": "category",
+           "expression": "`category`"
+          }
+         ],
+         "disaggregated": false
+        }
+       }
+      ],
+      "spec": {
+       "version": 3,
+       "widgetType": "bar",
+       "encodings": {
+        "x": {
+         "fieldName": "season",
+         "scale": {
+          "type": "categorical"
+         },
+         "displayName": "Season"
+        },
+        "y": {
+         "fieldName": "sum(volume_kg)",
+         "scale": {
+          "type": "quantitative"
+         },
+         "displayName": "Volume (kg)",
+         "format": {
+          "type": "number",
+          "abbreviation": "compact",
+          "decimalPlaces": {
+           "type": "max",
+           "places": 1
+          }
+         }
+        },
+        "color": {
+         "fieldName": "category",
+         "scale": {
+          "type": "categorical"
+         },
+         "displayName": "Category"
+        }
+       },
+       "frame": {
+        "title": "Volume by season and category",
+        "showTitle": true
+       }
+      }
+     },
+     "position": {
+      "x": 8,
+      "y": 7,
+      "width": 4,
+      "height": 8
+     }
+    }
+   ]
+  },
+  {
+   "name": "festivals",
+   "displayName": "3 \u00b7 Festivals & Promotions",
+   "pageType": "PAGE_TYPE_CANVAS",
+   "layoutVersion": "GRID_V1",
+   "layout": [
+    {
+     "widget": {
+      "name": "text-16",
+      "multilineTextboxSpec": {
+       "lines": [
+        "## Festivals & Promotions\nFestivals shift both volume and mix. B2B sell-in rises ~10 days before consumer sell-out. Promo lift = average daily channel revenue during the promo vs the 28 days before."
+       ]
+      }
+     },
+     "position": {
+      "x": 0,
+      "y": 0,
+      "width": 12,
+      "height": 1
+     }
+    },
+    {
+     "widget": {
+      "name": "line-17",
+      "queries": [
+       {
+        "name": "main_query",
+        "query": {
+         "datasetName": "ds_festival_daily",
+         "fields": [
+          {
+           "name": "order_date",
+           "expression": "`order_date`"
+          },
+          {
+           "name": "sum(net_revenue_inr)",
+           "expression": "SUM(`net_revenue_inr`)"
+          },
+          {
+           "name": "zone",
+           "expression": "`zone`"
+          }
+         ],
+         "disaggregated": false
+        }
+       }
+      ],
+      "spec": {
+       "version": 3,
+       "widgetType": "line",
+       "encodings": {
+        "x": {
+         "fieldName": "order_date",
+         "scale": {
+          "type": "temporal"
+         },
+         "displayName": "Day"
+        },
+        "y": {
+         "fieldName": "sum(net_revenue_inr)",
+         "scale": {
+          "type": "quantitative"
+         },
+         "displayName": "Net revenue",
+         "format": {
+          "type": "number-currency",
+          "currencyCode": "INR",
+          "abbreviation": "compact",
+          "decimalPlaces": {
+           "type": "max",
+           "places": 1
+          }
+         }
+        },
+        "color": {
+         "fieldName": "zone",
+         "scale": {
+          "type": "categorical"
+         },
+         "displayName": "Zone"
+        }
+       },
+       "frame": {
+        "title": "Daily net revenue by zone around the festive seasons",
+        "showTitle": true
+       },
+       "annotations": [
+        {
+         "type": "vertical-line",
+         "encodings": {
+          "x": {
+           "dataValue": "2024-09-07T00:00:00.000",
+           "dataType": "DATETIME"
+          },
+          "label": {
+           "value": "Ganesh Chaturthi"
+          },
+          "color": {
+           "value": {
+            "hex": "#6A4C93"
+           }
+          }
+         }
+        },
+        {
+         "type": "vertical-line",
+         "encodings": {
+          "x": {
+           "dataValue": "2024-10-10T00:00:00.000",
+           "dataType": "DATETIME"
+          },
+          "label": {
+           "value": "Durga Puja"
+          },
+          "color": {
+           "value": {
+            "hex": "#6A4C93"
+           }
+          }
+         }
+        },
+        {
+         "type": "vertical-line",
+         "encodings": {
+          "x": {
+           "dataValue": "2024-11-01T00:00:00.000",
+           "dataType": "DATETIME"
+          },
+          "label": {
+           "value": "Diwali"
+          },
+          "color": {
+           "value": {
+            "hex": "#E5533D"
+           }
+          }
+         }
+        },
+        {
+         "type": "vertical-line",
+         "encodings": {
+          "x": {
+           "dataValue": "2025-01-14T00:00:00.000",
+           "dataType": "DATETIME"
+          },
+          "label": {
+           "value": "Pongal"
+          },
+          "color": {
+           "value": {
+            "hex": "#6A4C93"
+           }
+          }
+         }
+        },
+        {
+         "type": "vertical-line",
+         "encodings": {
+          "x": {
+           "dataValue": "2025-03-14T00:00:00.000",
+           "dataType": "DATETIME"
+          },
+          "label": {
+           "value": "Holi"
+          },
+          "color": {
+           "value": {
+            "hex": "#6A4C93"
+           }
+          }
+         }
+        },
+        {
+         "type": "vertical-line",
+         "encodings": {
+          "x": {
+           "dataValue": "2025-03-31T00:00:00.000",
+           "dataType": "DATETIME"
+          },
+          "label": {
+           "value": "Eid al-Fitr"
+          },
+          "color": {
+           "value": {
+            "hex": "#6A4C93"
+           }
+          }
+         }
+        },
+        {
+         "type": "vertical-line",
+         "encodings": {
+          "x": {
+           "dataValue": "2025-10-20T00:00:00.000",
+           "dataType": "DATETIME"
+          },
+          "label": {
+           "value": "Diwali"
+          },
+          "color": {
+           "value": {
+            "hex": "#E5533D"
+           }
+          }
+         }
+        }
+       ]
+      }
+     },
+     "position": {
+      "x": 0,
+      "y": 1,
+      "width": 12,
+      "height": 6
+     }
+    },
+    {
+     "widget": {
+      "name": "table-18",
+      "queries": [
+       {
+        "name": "main_query",
+        "query": {
+         "datasetName": "ds_festival",
+         "fields": [
+          {
+           "name": "festival_name",
+           "expression": "`festival_name`"
+          },
+          {
+           "name": "year",
+           "expression": "`year`"
+          },
+          {
+           "name": "zone",
+           "expression": "`zone`"
+          },
+          {
+           "name": "base_spice",
+           "expression": "`base_spice`"
+          },
+          {
+           "name": "festival_daily_revenue_inr",
+           "expression": "`festival_daily_revenue_inr`"
+          },
+          {
+           "name": "baseline_daily_revenue_inr",
+           "expression": "`baseline_daily_revenue_inr`"
+          },
+          {
+           "name": "uplift",
+           "expression": "`uplift`"
+          }
+         ],
+         "disaggregated": true,
+         "orders": [
+          {
+           "direction": "DESC",
+           "expression": "`uplift`"
+          }
+         ]
+        }
+       }
+      ],
+      "spec": {
+       "version": 2,
+       "widgetType": "table",
+       "encodings": {
+        "columns": [
+         {
+          "fieldName": "festival_name",
+          "displayName": "Festival"
+         },
+         {
+          "fieldName": "year",
+          "displayName": "Year"
+         },
+         {
+          "fieldName": "zone",
+          "displayName": "Zone"
+         },
+         {
+          "fieldName": "base_spice",
+          "displayName": "Spice"
+         },
+         {
+          "fieldName": "festival_daily_revenue_inr",
+          "displayName": "Festival \u20b9/day",
+          "format": {
+           "type": "number-currency",
+           "currencyCode": "INR",
+           "abbreviation": "compact",
+           "decimalPlaces": {
+            "type": "max",
+            "places": 1
+           }
+          }
+         },
+         {
+          "fieldName": "baseline_daily_revenue_inr",
+          "displayName": "Baseline \u20b9/day",
+          "format": {
+           "type": "number-currency",
+           "currencyCode": "INR",
+           "abbreviation": "compact",
+           "decimalPlaces": {
+            "type": "max",
+            "places": 1
+           }
+          }
+         },
+         {
+          "fieldName": "uplift",
+          "displayName": "Uplift",
+          "format": {
+           "type": "number-percent",
+           "decimalPlaces": {
+            "type": "max",
+            "places": 1
+           }
+          }
+         }
+        ]
+       },
+       "frame": {
+        "title": "Biggest festival uplifts (spice \u00d7 zone)",
+        "showTitle": true
+       }
+      }
+     },
+     "position": {
+      "x": 0,
+      "y": 7,
+      "width": 6,
+      "height": 8
+     }
+    },
+    {
+     "widget": {
+      "name": "table-19",
+      "queries": [
+       {
+        "name": "main_query",
+        "query": {
+         "datasetName": "ds_promo",
+         "fields": [
+          {
+           "name": "promo_name",
+           "expression": "`promo_name`"
+          },
+          {
+           "name": "channel_name",
+           "expression": "`channel_name`"
+          },
+          {
+           "name": "discount_pct",
+           "expression": "`discount_pct`"
+          },
+          {
+           "name": "revenue_lift",
+           "expression": "`revenue_lift`"
+          },
+          {
+           "name": "discount_cost_inr",
+           "expression": "`discount_cost_inr`"
+          }
+         ],
+         "disaggregated": true,
+         "orders": [
+          {
+           "direction": "DESC",
+           "expression": "`revenue_lift`"
+          }
+         ]
+        }
+       }
+      ],
+      "spec": {
+       "version": 2,
+       "widgetType": "table",
+       "encodings": {
+        "columns": [
+         {
+          "fieldName": "promo_name",
+          "displayName": "Promotion"
+         },
+         {
+          "fieldName": "channel_name",
+          "displayName": "Channel"
+         },
+         {
+          "fieldName": "discount_pct",
+          "displayName": "Discount",
+          "format": {
+           "type": "number-percent",
+           "decimalPlaces": {
+            "type": "max",
+            "places": 1
+           }
+          }
+         },
+         {
+          "fieldName": "revenue_lift",
+          "displayName": "Revenue lift",
+          "format": {
+           "type": "number-percent",
+           "decimalPlaces": {
+            "type": "max",
+            "places": 1
+           }
+          },
+          "style": {
+           "type": "basic",
+           "rules": [
+            {
+             "condition": {
+              "operand": {
+               "type": "data-value",
+               "value": "0"
+              },
+              "operator": "<"
+             },
+             "foregroundColor": {
+              "hex": "#E5533D"
+             }
+            }
+           ]
+          }
+         },
+         {
+          "fieldName": "discount_cost_inr",
+          "displayName": "Discount cost",
+          "format": {
+           "type": "number-currency",
+           "currencyCode": "INR",
+           "abbreviation": "compact",
+           "decimalPlaces": {
+            "type": "max",
+            "places": 1
+           }
+          }
+         }
+        ]
+       },
+       "frame": {
+        "title": "Promotion effectiveness",
+        "showTitle": true
+       }
+      }
+     },
+     "position": {
+      "x": 6,
+      "y": 7,
+      "width": 6,
+      "height": 8
+     }
+    },
+    {
+     "widget": {
+      "name": "bar-20",
+      "queries": [
+       {
+        "name": "main_query",
+        "query": {
+         "datasetName": "ds_sales",
+         "fields": [
+          {
+           "name": "channel_name",
+           "expression": "`channel_name`"
+          },
+          {
+           "name": "measure(Promo Share)",
+           "expression": "MEASURE(`Promo Share`)"
+          }
+         ],
+         "disaggregated": false
+        }
+       }
+      ],
+      "spec": {
+       "version": 3,
+       "widgetType": "bar",
+       "encodings": {
+        "x": {
+         "fieldName": "channel_name",
+         "scale": {
+          "type": "categorical"
+         },
+         "displayName": "Channel"
+        },
+        "y": {
+         "fieldName": "measure(Promo Share)",
+         "scale": {
+          "type": "quantitative"
+         },
+         "displayName": "Promo share",
+         "format": {
+          "type": "number-percent",
+          "decimalPlaces": {
+           "type": "max",
+           "places": 1
+          }
+         }
+        }
+       },
+       "frame": {
+        "title": "Share of revenue sold on promotion, by channel",
+        "showTitle": true
+       }
+      }
+     },
+     "position": {
+      "x": 0,
+      "y": 15,
+      "width": 12,
+      "height": 5
+     }
+    }
+   ]
+  },
+  {
+   "name": "forecast",
+   "displayName": "4 \u00b7 Demand Forecast",
+   "pageType": "PAGE_TYPE_CANVAS",
+   "layoutVersion": "GRID_V1",
+   "layout": [
+    {
+     "widget": {
+      "name": "text-21",
+      "multilineTextboxSpec": {
+       "lines": [
+        "## Demand Forecast \u2014 next 12 weeks\nProphet per SKU \u00d7 zone (882 series) with Indian festivals as holidays and promo intensity as a regressor. Accuracy from a 3-fold rolling backtest (12 weeks each). Filter by zone and category on the Filters page."
+       ]
+      }
+     },
+     "position": {
+      "x": 0,
+      "y": 0,
+      "width": 12,
+      "height": 1
+     }
+    },
+    {
+     "widget": {
+      "name": "kpi-22",
+      "queries": [
+       {
+        "name": "main_query",
+        "query": {
+         "datasetName": "ds_accuracy",
+         "fields": [
+          {
+           "name": "measure(WAPE Prophet)",
+           "expression": "MEASURE(`WAPE Prophet`)"
+          }
+         ],
+         "disaggregated": false
+        }
+       }
+      ],
+      "spec": {
+       "version": 2,
+       "widgetType": "counter",
+       "encodings": {
+        "value": {
+         "fieldName": "measure(WAPE Prophet)",
+         "displayName": "WAPE \u00b7 Prophet",
+         "format": {
+          "type": "number-percent",
+          "decimalPlaces": {
+           "type": "max",
+           "places": 1
+          }
+         }
+        }
+       },
+       "frame": {
+        "title": "WAPE \u00b7 Prophet",
+        "showTitle": true,
+        "showDescription": true,
+        "description": "Weighted absolute % error in backtest (lower is better)"
+       }
+      }
+     },
+     "position": {
+      "x": 0,
+      "y": 1,
+      "width": 4,
+      "height": 3
+     }
+    },
+    {
+     "widget": {
+      "name": "kpi-23",
+      "queries": [
+       {
+        "name": "main_query",
+        "query": {
+         "datasetName": "ds_accuracy",
+         "fields": [
+          {
+           "name": "measure(WAPE Seasonal Naive)",
+           "expression": "MEASURE(`WAPE Seasonal Naive`)"
+          }
+         ],
+         "disaggregated": false
+        }
+       }
+      ],
+      "spec": {
+       "version": 2,
+       "widgetType": "counter",
+       "encodings": {
+        "value": {
+         "fieldName": "measure(WAPE Seasonal Naive)",
+         "displayName": "WAPE \u00b7 Seasonal naive",
+         "format": {
+          "type": "number-percent",
+          "decimalPlaces": {
+           "type": "max",
+           "places": 1
+          }
+         }
+        }
+       },
+       "frame": {
+        "title": "WAPE \u00b7 Seasonal naive",
+        "showTitle": true,
+        "showDescription": true,
+        "description": "Same week last year baseline"
+       }
+      }
+     },
+     "position": {
+      "x": 4,
+      "y": 1,
+      "width": 4,
+      "height": 3
+     }
+    },
+    {
+     "widget": {
+      "name": "kpi-24",
+      "queries": [
+       {
+        "name": "main_query",
+        "query": {
+         "datasetName": "ds_model_compare",
+         "fields": [
+          {
+           "name": "sum(prophet_units)",
+           "expression": "SUM(`prophet_units`)"
+          }
+         ],
+         "disaggregated": false
+        }
+       }
+      ],
+      "spec": {
+       "version": 2,
+       "widgetType": "counter",
+       "encodings": {
+        "value": {
+         "fieldName": "sum(prophet_units)",
+         "displayName": "Forecast units (next 12 wks)",
+         "format": {
+          "type": "number",
+          "abbreviation": "compact",
+          "decimalPlaces": {
+           "type": "max",
+           "places": 1
+          }
+         }
+        }
+       },
+       "frame": {
+        "title": "Forecast units (next 12 wks)",
+        "showTitle": true
+       }
+      }
+     },
+     "position": {
+      "x": 8,
+      "y": 1,
+      "width": 4,
+      "height": 3
+     }
+    },
+    {
+     "widget": {
+      "name": "forecast-25",
+      "queries": [
+       {
+        "name": "main_query",
+        "query": {
+         "datasetName": "ds_forecast",
+         "fields": [
+          {
+           "name": "week_start",
+           "expression": "`week_start`"
+          },
+          {
+           "name": "sum(actual_units)",
+           "expression": "SUM(`actual_units`)"
+          },
+          {
+           "name": "sum(forecast_units)",
+           "expression": "SUM(`forecast_units`)"
+          },
+          {
+           "name": "sum(forecast_lower)",
+           "expression": "SUM(`forecast_lower`)"
+          },
+          {
+           "name": "sum(forecast_upper)",
+           "expression": "SUM(`forecast_upper`)"
+          }
+         ],
+         "disaggregated": false
+        }
+       }
+      ],
+      "spec": {
+       "version": 1,
+       "widgetType": "forecast-line",
+       "frame": {
+        "title": "Weekly units \u2014 actuals + Prophet forecast (80% interval)",
+        "showTitle": true
+       },
+       "encodings": {
+        "x": {
+         "fieldName": "week_start",
+         "scale": {
+          "type": "temporal"
+         }
+        },
+        "y": {
+         "scale": {
+          "type": "quantitative",
+          "domainMin": 0
+         },
+         "original": {
+          "fieldName": "sum(actual_units)",
+          "displayName": "Actual units"
+         },
+         "prediction": {
+          "fieldName": "sum(forecast_units)",
+          "displayName": "Forecast"
+         },
+         "predictionUpper": {
+          "fieldName": "sum(forecast_upper)"
+         },
+         "predictionLower": {
+          "fieldName": "sum(forecast_lower)"
+         }
+        }
+       },
+       "annotations": [
+        {
+         "type": "vertical-line",
+         "encodings": {
+          "x": {
+           "dataValue": "2026-11-08T00:00:00.000",
+           "dataType": "DATETIME"
+          },
+          "label": {
+           "value": "Diwali 2026"
+          },
+          "color": {
+           "value": {
+            "hex": "#6A4C93"
+           }
+          }
+         }
+        }
+       ]
+      }
+     },
+     "position": {
+      "x": 0,
+      "y": 4,
+      "width": 12,
+      "height": 7
+     }
+    },
+    {
+     "widget": {
+      "name": "line-26",
+      "queries": [
+       {
+        "name": "main_query",
+        "query": {
+         "datasetName": "ds_model_compare",
+         "fields": [
+          {
+           "name": "week_start",
+           "expression": "`week_start`"
+          },
+          {
+           "name": "sum(prophet_units)",
+           "expression": "SUM(`prophet_units`)"
+          },
+          {
+           "name": "sum(ai_forecast_units)",
+           "expression": "SUM(`ai_forecast_units`)"
+          },
+          {
+           "name": "sum(seasonal_naive_units)",
+           "expression": "SUM(`seasonal_naive_units`)"
+          }
+         ],
+         "disaggregated": false
+        }
+       }
+      ],
+      "spec": {
+       "version": 3,
+       "widgetType": "line",
+       "encodings": {
+        "x": {
+         "fieldName": "week_start",
+         "scale": {
+          "type": "temporal"
+         },
+         "displayName": "Week"
+        },
+        "y": {
+         "scale": {
+          "type": "quantitative"
+         },
+         "fields": [
+          {
+           "fieldName": "sum(prophet_units)",
+           "displayName": "Prophet"
+          },
+          {
+           "fieldName": "sum(ai_forecast_units)",
+           "displayName": "ai_forecast()"
+          },
+          {
+           "fieldName": "sum(seasonal_naive_units)",
+           "displayName": "Seasonal naive"
+          }
+         ]
+        }
+       },
+       "frame": {
+        "title": "Model comparison over the horizon",
+        "showTitle": true
+       }
+      }
+     },
+     "position": {
+      "x": 0,
+      "y": 11,
+      "width": 6,
+      "height": 6
+     }
+    },
+    {
+     "widget": {
+      "name": "bar-27",
+      "queries": [
+       {
+        "name": "main_query",
+        "query": {
+         "datasetName": "ds_accuracy",
+         "fields": [
+          {
+           "name": "category",
+           "expression": "`category`"
+          },
+          {
+           "name": "measure(WAPE Prophet)",
+           "expression": "MEASURE(`WAPE Prophet`)"
+          },
+          {
+           "name": "measure(WAPE Seasonal Naive)",
+           "expression": "MEASURE(`WAPE Seasonal Naive`)"
+          }
+         ],
+         "disaggregated": false
+        }
+       }
+      ],
+      "spec": {
+       "version": 3,
+       "widgetType": "bar",
+       "encodings": {
+        "x": {
+         "fieldName": "category",
+         "scale": {
+          "type": "categorical"
+         },
+         "displayName": "Category"
+        },
+        "y": {
+         "scale": {
+          "type": "quantitative"
+         },
+         "fields": [
+          {
+           "fieldName": "measure(WAPE Prophet)",
+           "displayName": "Prophet",
+           "format": {
+            "type": "number-percent",
+            "decimalPlaces": {
+             "type": "max",
+             "places": 1
+            }
+           }
+          },
+          {
+           "fieldName": "measure(WAPE Seasonal Naive)",
+           "displayName": "Seasonal naive",
+           "format": {
+            "type": "number-percent",
+            "decimalPlaces": {
+             "type": "max",
+             "places": 1
+            }
+           }
+          }
+         ]
+        }
+       },
+       "frame": {
+        "title": "Backtest WAPE by category",
+        "showTitle": true
+       },
+       "mark": {
+        "layout": "group"
+       }
+      }
+     },
+     "position": {
+      "x": 6,
+      "y": 11,
+      "width": 6,
+      "height": 6
+     }
+    }
+   ]
+  },
+  {
+   "name": "inventory",
+   "displayName": "5 \u00b7 Inventory & Supply",
+   "pageType": "PAGE_TYPE_CANVAS",
+   "layoutVersion": "GRID_V1",
+   "layout": [
+    {
+     "widget": {
+      "name": "text-28",
+      "multilineTextboxSpec": {
+       "lines": [
+        "## Inventory & Supply\nThe **2024 Andhra/Telangana chilli crop failure** (Jun\u2013Oct 2024) is visible here: refused supplier allocations, a low-grade alternate supplier, stockouts in South/West DCs, and a margin squeeze until the July 2024 MRP increase."
+       ]
+      }
+     },
+     "position": {
+      "x": 0,
+      "y": 0,
+      "width": 12,
+      "height": 2
+     }
+    },
+    {
+     "widget": {
+      "name": "kpi-29",
+      "queries": [
+       {
+        "name": "main_query",
+        "query": {
+         "datasetName": "ds_inventory",
+         "fields": [
+          {
+           "name": "measure(Fill Rate)",
+           "expression": "MEASURE(`Fill Rate`)"
+          }
+         ],
+         "disaggregated": false
+        }
+       }
+      ],
+      "spec": {
+       "version": 2,
+       "widgetType": "counter",
+       "encodings": {
+        "value": {
+         "fieldName": "measure(Fill Rate)",
+         "displayName": "Fill rate (3 yrs)",
+         "format": {
+          "type": "number-percent",
+          "decimalPlaces": {
+           "type": "max",
+           "places": 1
+          }
+         }
+        }
+       },
+       "frame": {
+        "title": "Fill rate (3 yrs)",
+        "showTitle": true
+       }
+      }
+     },
+     "position": {
+      "x": 0,
+      "y": 2,
+      "width": 4,
+      "height": 3
+     }
+    },
+    {
+     "widget": {
+      "name": "kpi-30",
+      "queries": [
+       {
+        "name": "main_query",
+        "query": {
+         "datasetName": "ds_reorder",
+         "fields": [
+          {
+           "name": "count(sku_id)",
+           "expression": "COUNT(`sku_id`)"
+          }
+         ],
+         "disaggregated": false
+        }
+       }
+      ],
+      "spec": {
+       "version": 2,
+       "widgetType": "counter",
+       "encodings": {
+        "value": {
+         "fieldName": "count(sku_id)",
+         "displayName": "SKU\u00d7DC at HIGH stockout risk",
+         "format": {
+          "type": "number",
+          "abbreviation": "compact",
+          "decimalPlaces": {
+           "type": "max",
+           "places": 1
+          }
+         }
+        }
+       },
+       "frame": {
+        "title": "SKU\u00d7DC at HIGH stockout risk",
+        "showTitle": true,
+        "showDescription": true,
+        "description": "Use the risk table filter below"
+       }
+      }
+     },
+     "position": {
+      "x": 4,
+      "y": 2,
+      "width": 4,
+      "height": 3
+     }
+    },
+    {
+     "widget": {
+      "name": "kpi-31",
+      "queries": [
+       {
+        "name": "main_query",
+        "query": {
+         "datasetName": "ds_reorder",
+         "fields": [
+          {
+           "name": "sum(recommended_order_units)",
+           "expression": "SUM(`recommended_order_units`)"
+          }
+         ],
+         "disaggregated": false
+        }
+       }
+      ],
+      "spec": {
+       "version": 2,
+       "widgetType": "counter",
+       "encodings": {
+        "value": {
+         "fieldName": "sum(recommended_order_units)",
+         "displayName": "Recommended order units",
+         "format": {
+          "type": "number",
+          "abbreviation": "compact",
+          "decimalPlaces": {
+           "type": "max",
+           "places": 1
+          }
+         }
+        }
+       },
+       "frame": {
+        "title": "Recommended order units",
+        "showTitle": true
+       }
+      }
+     },
+     "position": {
+      "x": 8,
+      "y": 2,
+      "width": 4,
+      "height": 3
+     }
+    },
+    {
+     "widget": {
+      "name": "line-32",
+      "queries": [
+       {
+        "name": "main_query",
+        "query": {
+         "datasetName": "ds_inventory",
+         "fields": [
+          {
+           "name": "week_start",
+           "expression": "`week_start`"
+          },
+          {
+           "name": "measure(Fill Rate)",
+           "expression": "MEASURE(`Fill Rate`)"
+          },
+          {
+           "name": "spice_group",
+           "expression": "`spice_group`"
+          }
+         ],
+         "disaggregated": false
+        }
+       }
+      ],
+      "spec": {
+       "version": 3,
+       "widgetType": "line",
+       "encodings": {
+        "x": {
+         "fieldName": "week_start",
+         "scale": {
+          "type": "temporal"
+         },
+         "displayName": "Week"
+        },
+        "y": {
+         "fieldName": "measure(Fill Rate)",
+         "scale": {
+          "type": "quantitative"
+         },
+         "displayName": "Fill rate",
+         "format": {
+          "type": "number-percent",
+          "decimalPlaces": {
+           "type": "max",
+           "places": 1
+          }
+         }
+        },
+        "color": {
+         "fieldName": "spice_group",
+         "scale": {
+          "type": "categorical",
+          "mappings": [
+           {
+            "value": "Chilli",
+            "color": "#E5533D"
+           },
+           {
+            "value": "Other spices",
+            "color": "#2A9D8F"
+           }
+          ]
+         },
+         "displayName": "Group"
+        }
+       },
+       "frame": {
+        "title": "Weekly fill rate \u2014 chilli vs other spices",
+        "showTitle": true
+       },
+       "annotations": [
+        {
+         "type": "vertical-line",
+         "encodings": {
+          "x": {
+           "dataValue": "2024-06-01T00:00:00.000",
+           "dataType": "DATETIME"
+          },
+          "label": {
+           "value": "Crop failure"
+          },
+          "color": {
+           "value": {
+            "hex": "#E5533D"
+           }
+          }
+         }
+        }
+       ]
+      }
+     },
+     "position": {
+      "x": 0,
+      "y": 5,
+      "width": 6,
+      "height": 6
+     }
+    },
+    {
+     "widget": {
+      "name": "line-33",
+      "queries": [
+       {
+        "name": "main_query",
+        "query": {
+         "datasetName": "ds_margin",
+         "fields": [
+          {
+           "name": "month",
+           "expression": "`month`"
+          },
+          {
+           "name": "measure(GM %)",
+           "expression": "MEASURE(`GM %`)"
+          },
+          {
+           "name": "spice_group",
+           "expression": "`spice_group`"
+          }
+         ],
+         "disaggregated": false
+        }
+       }
+      ],
+      "spec": {
+       "version": 3,
+       "widgetType": "line",
+       "encodings": {
+        "x": {
+         "fieldName": "month",
+         "scale": {
+          "type": "temporal"
+         },
+         "displayName": "Month"
+        },
+        "y": {
+         "fieldName": "measure(GM %)",
+         "scale": {
+          "type": "quantitative"
+         },
+         "displayName": "Gross margin",
+         "format": {
+          "type": "number-percent",
+          "decimalPlaces": {
+           "type": "max",
+           "places": 1
+          }
+         }
+        },
+        "color": {
+         "fieldName": "spice_group",
+         "scale": {
+          "type": "categorical",
+          "mappings": [
+           {
+            "value": "Chilli",
+            "color": "#E5533D"
+           },
+           {
+            "value": "Other spices",
+            "color": "#2A9D8F"
+           }
+          ]
+         },
+         "displayName": "Group"
+        }
+       },
+       "frame": {
+        "title": "Gross margin % \u2014 chilli vs other spices",
+        "showTitle": true
+       },
+       "annotations": [
+        {
+         "type": "vertical-line",
+         "encodings": {
+          "x": {
+           "dataValue": "2024-07-01T00:00:00.000",
+           "dataType": "DATETIME"
+          },
+          "label": {
+           "value": "MRP +12% (chilli)"
+          },
+          "color": {
+           "value": {
+            "hex": "#6A4C93"
+           }
+          }
+         }
+        }
+       ]
+      }
+     },
+     "position": {
+      "x": 6,
+      "y": 5,
+      "width": 6,
+      "height": 6
+     }
+    },
+    {
+     "widget": {
+      "name": "bar-34",
+      "queries": [
+       {
+        "name": "main_query",
+        "query": {
+         "datasetName": "ds_inventory",
+         "fields": [
+          {
+           "name": "warehouse_name",
+           "expression": "`warehouse_name`"
+          },
+          {
+           "name": "sum(stockout_days)",
+           "expression": "SUM(`stockout_days`)"
+          },
+          {
+           "name": "spice_group",
+           "expression": "`spice_group`"
+          }
+         ],
+         "disaggregated": false
+        }
+       }
+      ],
+      "spec": {
+       "version": 3,
+       "widgetType": "bar",
+       "encodings": {
+        "x": {
+         "fieldName": "warehouse_name",
+         "scale": {
+          "type": "categorical"
+         },
+         "displayName": "Warehouse"
+        },
+        "y": {
+         "fieldName": "sum(stockout_days)",
+         "scale": {
+          "type": "quantitative"
+         },
+         "displayName": "Stockout days",
+         "format": {
+          "type": "number",
+          "abbreviation": "compact",
+          "decimalPlaces": {
+           "type": "max",
+           "places": 1
+          }
+         }
+        },
+        "color": {
+         "fieldName": "spice_group",
+         "scale": {
+          "type": "categorical",
+          "mappings": [
+           {
+            "value": "Chilli",
+            "color": "#E5533D"
+           },
+           {
+            "value": "Other spices",
+            "color": "#2A9D8F"
+           }
+          ]
+         },
+         "displayName": "Group"
+        }
+       },
+       "frame": {
+        "title": "Stockout days by DC",
+        "showTitle": true
+       }
+      }
+     },
+     "position": {
+      "x": 0,
+      "y": 11,
+      "width": 6,
+      "height": 6
+     }
+    },
+    {
+     "widget": {
+      "name": "table-35",
+      "queries": [
+       {
+        "name": "main_query",
+        "query": {
+         "datasetName": "ds_supplier",
+         "fields": [
+          {
+           "name": "supplier_name",
+           "expression": "`supplier_name`"
+          },
+          {
+           "name": "supplier_tier",
+           "expression": "`supplier_tier`"
+          },
+          {
+           "name": "base_spice",
+           "expression": "`base_spice`"
+          },
+          {
+           "name": "quality_grade",
+           "expression": "`quality_grade`"
+          },
+          {
+           "name": "pos",
+           "expression": "`pos`"
+          },
+          {
+           "name": "avg_fill_rate",
+           "expression": "`avg_fill_rate`"
+          },
+          {
+           "name": "avg_delay_days",
+           "expression": "`avg_delay_days`"
+          }
+         ],
+         "disaggregated": true,
+         "orders": [
+          {
+           "direction": "ASC",
+           "expression": "`avg_fill_rate`"
+          }
+         ]
+        }
+       }
+      ],
+      "spec": {
+       "version": 2,
+       "widgetType": "table",
+       "encodings": {
+        "columns": [
+         {
+          "fieldName": "supplier_name",
+          "displayName": "Supplier"
+         },
+         {
+          "fieldName": "supplier_tier",
+          "displayName": "Tier"
+         },
+         {
+          "fieldName": "base_spice",
+          "displayName": "Spice"
+         },
+         {
+          "fieldName": "quality_grade",
+          "displayName": "Grade"
+         },
+         {
+          "fieldName": "pos",
+          "displayName": "POs"
+         },
+         {
+          "fieldName": "avg_fill_rate",
+          "displayName": "Fill rate",
+          "format": {
+           "type": "number-percent",
+           "decimalPlaces": {
+            "type": "max",
+            "places": 1
+           }
+          }
+         },
+         {
+          "fieldName": "avg_delay_days",
+          "displayName": "Avg delay (d)",
+          "format": {
+           "type": "number",
+           "decimalPlaces": {
+            "type": "max",
+            "places": 1
+           }
+          }
+         }
+        ]
+       },
+       "frame": {
+        "title": "Supplier performance",
+        "showTitle": true
+       }
+      }
+     },
+     "position": {
+      "x": 6,
+      "y": 11,
+      "width": 6,
+      "height": 6
+     }
+    },
+    {
+     "widget": {
+      "name": "table-36",
+      "queries": [
+       {
+        "name": "main_query",
+        "query": {
+         "datasetName": "ds_reorder",
+         "fields": [
+          {
+           "name": "stockout_risk",
+           "expression": "`stockout_risk`"
+          },
+          {
+           "name": "warehouse_name",
+           "expression": "`warehouse_name`"
+          },
+          {
+           "name": "product_name",
+           "expression": "`product_name`"
+          },
+          {
+           "name": "on_hand_units",
+           "expression": "`on_hand_units`"
+          },
+          {
+           "name": "open_po_units",
+           "expression": "`open_po_units`"
+          },
+          {
+           "name": "forecast_next_4w_units",
+           "expression": "`forecast_next_4w_units`"
+          },
+          {
+           "name": "weeks_of_cover",
+           "expression": "`weeks_of_cover`"
+          },
+          {
+           "name": "recommended_order_units",
+           "expression": "`recommended_order_units`"
+          },
+          {
+           "name": "projected_stockout_date",
+           "expression": "`projected_stockout_date`"
+          }
+         ],
+         "disaggregated": true,
+         "orders": [
+          {
+           "direction": "ASC",
+           "expression": "`weeks_of_cover`"
+          }
+         ]
+        }
+       }
+      ],
+      "spec": {
+       "version": 2,
+       "widgetType": "table",
+       "encodings": {
+        "columns": [
+         {
+          "fieldName": "stockout_risk",
+          "displayName": "Risk",
+          "style": {
+           "type": "basic",
+           "rules": [
+            {
+             "condition": {
+              "operand": {
+               "type": "data-value",
+               "value": "High"
+              },
+              "operator": "="
+             },
+             "backgroundColor": {
+              "hex": "#E5533D"
+             },
+             "foregroundColor": {
+              "hex": "#FFFFFF"
+             }
+            },
+            {
+             "condition": {
+              "operand": {
+               "type": "data-value",
+               "value": "Medium"
+              },
+              "operator": "="
+             },
+             "backgroundColor": {
+              "hex": "#F4A261"
+             }
+            }
+           ]
+          }
+         },
+         {
+          "fieldName": "warehouse_name",
+          "displayName": "DC"
+         },
+         {
+          "fieldName": "product_name",
+          "displayName": "Product"
+         },
+         {
+          "fieldName": "on_hand_units",
+          "displayName": "On hand",
+          "format": {
+           "type": "number",
+           "abbreviation": "compact",
+           "decimalPlaces": {
+            "type": "max",
+            "places": 1
+           }
+          }
+         },
+         {
+          "fieldName": "open_po_units",
+          "displayName": "Open PO",
+          "format": {
+           "type": "number",
+           "abbreviation": "compact",
+           "decimalPlaces": {
+            "type": "max",
+            "places": 1
+           }
+          }
+         },
+         {
+          "fieldName": "forecast_next_4w_units",
+          "displayName": "Fcst 4w",
+          "format": {
+           "type": "number",
+           "abbreviation": "compact",
+           "decimalPlaces": {
+            "type": "max",
+            "places": 1
+           }
+          }
+         },
+         {
+          "fieldName": "weeks_of_cover",
+          "displayName": "Weeks cover"
+         },
+         {
+          "fieldName": "recommended_order_units",
+          "displayName": "Order qty",
+          "format": {
+           "type": "number",
+           "abbreviation": "compact",
+           "decimalPlaces": {
+            "type": "max",
+            "places": 1
+           }
+          }
+         },
+         {
+          "fieldName": "projected_stockout_date",
+          "displayName": "Stockout by"
+         }
+        ]
+       },
+       "frame": {
+        "title": "Reorder recommendations (as of 30 Sep 2026)",
+        "showTitle": true
+       }
+      }
+     },
+     "position": {
+      "x": 0,
+      "y": 17,
+      "width": 12,
+      "height": 8
+     }
+    }
+   ]
+  },
+  {
+   "name": "customers_dq",
+   "displayName": "6 \u00b7 Customers & Data Health",
+   "pageType": "PAGE_TYPE_CANVAS",
+   "layoutVersion": "GRID_V1",
+   "layout": [
+    {
+     "widget": {
+      "name": "text-37",
+      "multilineTextboxSpec": {
+       "lines": [
+        "## Customers & Data Health\nRFM segments for identified consumers (D2C, marketplace, quick commerce, loyalty). Data-quality issues injected at source are caught by pipeline expectations and quarantined."
+       ]
+      }
+     },
+     "position": {
+      "x": 0,
+      "y": 0,
+      "width": 12,
+      "height": 1
+     }
+    },
+    {
+     "widget": {
+      "name": "bar-38",
+      "queries": [
+       {
+        "name": "main_query",
+        "query": {
+         "datasetName": "ds_rfm",
+         "fields": [
+          {
+           "name": "rfm_segment",
+           "expression": "`rfm_segment`"
+          },
+          {
+           "name": "sum(customers)",
+           "expression": "SUM(`customers`)"
+          }
+         ],
+         "disaggregated": false,
+         "orders": [
+          {
+           "direction": "DESC",
+           "expression": "SUM(`customers`)"
+          }
+         ]
+        }
+       }
+      ],
+      "spec": {
+       "version": 3,
+       "widgetType": "bar",
+       "encodings": {
+        "x": {
+         "fieldName": "rfm_segment",
+         "scale": {
+          "type": "categorical"
+         },
+         "displayName": "Segment"
+        },
+        "y": {
+         "fieldName": "sum(customers)",
+         "scale": {
+          "type": "quantitative"
+         },
+         "displayName": "Customers",
+         "format": {
+          "type": "number",
+          "abbreviation": "compact",
+          "decimalPlaces": {
+           "type": "max",
+           "places": 1
+          }
+         }
+        }
+       },
+       "frame": {
+        "title": "Customers by RFM segment",
+        "showTitle": true
+       }
+      }
+     },
+     "position": {
+      "x": 0,
+      "y": 1,
+      "width": 6,
+      "height": 6
+     }
+    },
+    {
+     "widget": {
+      "name": "bar-39",
+      "queries": [
+       {
+        "name": "main_query",
+        "query": {
+         "datasetName": "ds_rfm",
+         "fields": [
+          {
+           "name": "rfm_segment",
+           "expression": "`rfm_segment`"
+          },
+          {
+           "name": "sum(monetary_inr)",
+           "expression": "SUM(`monetary_inr`)"
+          },
+          {
+           "name": "loyalty_tier",
+           "expression": "`loyalty_tier`"
+          }
+         ],
+         "disaggregated": false
+        }
+       }
+      ],
+      "spec": {
+       "version": 3,
+       "widgetType": "bar",
+       "encodings": {
+        "x": {
+         "fieldName": "rfm_segment",
+         "scale": {
+          "type": "categorical"
+         },
+         "displayName": "Segment"
+        },
+        "y": {
+         "fieldName": "sum(monetary_inr)",
+         "scale": {
+          "type": "quantitative"
+         },
+         "displayName": "Lifetime revenue",
+         "format": {
+          "type": "number-currency",
+          "currencyCode": "INR",
+          "abbreviation": "compact",
+          "decimalPlaces": {
+           "type": "max",
+           "places": 1
+          }
+         }
+        },
+        "color": {
+         "fieldName": "loyalty_tier",
+         "scale": {
+          "type": "categorical"
+         },
+         "displayName": "Loyalty tier"
+        }
+       },
+       "frame": {
+        "title": "Customer value by segment",
+        "showTitle": true
+       }
+      }
+     },
+     "position": {
+      "x": 6,
+      "y": 1,
+      "width": 6,
+      "height": 6
+     }
+    },
+    {
+     "widget": {
+      "name": "bar-40",
+      "queries": [
+       {
+        "name": "main_query",
+        "query": {
+         "datasetName": "ds_layers",
+         "fields": [
+          {
+           "name": "layer",
+           "expression": "`layer`"
+          },
+          {
+           "name": "sum(rows)",
+           "expression": "SUM(`rows`)"
+          }
+         ],
+         "disaggregated": false
+        }
+       }
+      ],
+      "spec": {
+       "version": 3,
+       "widgetType": "bar",
+       "encodings": {
+        "x": {
+         "fieldName": "layer",
+         "scale": {
+          "type": "categorical"
+         },
+         "displayName": "Layer"
+        },
+        "y": {
+         "fieldName": "sum(rows)",
+         "scale": {
+          "type": "quantitative"
+         },
+         "displayName": "Rows",
+         "format": {
+          "type": "number",
+          "abbreviation": "compact",
+          "decimalPlaces": {
+           "type": "max",
+           "places": 1
+          }
+         }
+        }
+       },
+       "frame": {
+        "title": "Order lines through the medallion layers",
+        "showTitle": true
+       }
+      }
+     },
+     "position": {
+      "x": 0,
+      "y": 7,
+      "width": 6,
+      "height": 6
+     }
+    },
+    {
+     "widget": {
+      "name": "bar-41",
+      "queries": [
+       {
+        "name": "main_query",
+        "query": {
+         "datasetName": "ds_dq",
+         "fields": [
+          {
+           "name": "dq_reason",
+           "expression": "`dq_reason`"
+          },
+          {
+           "name": "sum(rows)",
+           "expression": "SUM(`rows`)"
+          },
+          {
+           "name": "outcome",
+           "expression": "`outcome`"
+          }
+         ],
+         "disaggregated": false
+        }
+       }
+      ],
+      "spec": {
+       "version": 3,
+       "widgetType": "bar",
+       "encodings": {
+        "x": {
+         "fieldName": "sum(rows)",
+         "scale": {
+          "type": "quantitative"
+         },
+         "displayName": "Rows",
+         "format": {
+          "type": "number",
+          "abbreviation": "compact",
+          "decimalPlaces": {
+           "type": "max",
+           "places": 1
+          }
+         }
+        },
+        "y": {
+         "fieldName": "dq_reason",
+         "scale": {
+          "type": "categorical",
+          "sort": {
+           "by": "x-reversed"
+          }
+         },
+         "displayName": "Reason"
+        },
+        "color": {
+         "fieldName": "outcome",
+         "scale": {
+          "type": "categorical",
+          "mappings": [
+           {
+            "value": "Rejected (quarantined)",
+            "color": "#E5533D"
+           },
+           {
+            "value": "Accepted (flagged)",
+            "color": "#2A9D8F"
+           }
+          ]
+         },
+         "displayName": "Outcome"
+        }
+       },
+       "frame": {
+        "title": "Data-quality outcomes by reason",
+        "showTitle": true
+       }
+      }
+     },
+     "position": {
+      "x": 6,
+      "y": 7,
+      "width": 6,
+      "height": 6
+     }
+    }
+   ]
+  },
+  {
+   "name": "filters",
+   "displayName": "Filters",
+   "pageType": "PAGE_TYPE_GLOBAL_FILTERS",
+   "layoutVersion": "GRID_V1",
+   "layout": [
+    {
+     "widget": {
+      "name": "filter-42",
+      "queries": [
+       {
+        "name": "f_ds_sales_order_date",
+        "query": {
+         "datasetName": "ds_sales",
+         "fields": [
+          {
+           "name": "order_date",
+           "expression": "`order_date`"
+          }
+         ],
+         "disaggregated": false
+        }
+       },
+       {
+        "name": "f_ds_orders_order_date",
+        "query": {
+         "datasetName": "ds_orders",
+         "fields": [
+          {
+           "name": "order_date",
+           "expression": "`order_date`"
+          }
+         ],
+         "disaggregated": false
+        }
+       },
+       {
+        "name": "f_ds_state_map_order_date",
+        "query": {
+         "datasetName": "ds_state_map",
+         "fields": [
+          {
+           "name": "order_date",
+           "expression": "`order_date`"
+          }
+         ],
+         "disaggregated": false
+        }
+       },
+       {
+        "name": "f_ds_festival_daily_order_date",
+        "query": {
+         "datasetName": "ds_festival_daily",
+         "fields": [
+          {
+           "name": "order_date",
+           "expression": "`order_date`"
+          }
+         ],
+         "disaggregated": false
+        }
+       }
+      ],
+      "spec": {
+       "version": 2,
+       "widgetType": "filter-date-range-picker",
+       "encodings": {
+        "fields": [
+         {
+          "fieldName": "order_date",
+          "queryName": "f_ds_sales_order_date"
+         },
+         {
+          "fieldName": "order_date",
+          "queryName": "f_ds_orders_order_date"
+         },
+         {
+          "fieldName": "order_date",
+          "queryName": "f_ds_state_map_order_date"
+         },
+         {
+          "fieldName": "order_date",
+          "queryName": "f_ds_festival_daily_order_date"
+         }
+        ]
+       },
+       "frame": {
+        "title": "Date",
+        "showTitle": true
+       }
+      }
+     },
+     "position": {
+      "x": 0,
+      "y": 0,
+      "width": 3,
+      "height": 2
+     }
+    },
+    {
+     "widget": {
+      "name": "filter-43",
+      "queries": [
+       {
+        "name": "f_ds_sales_zone",
+        "query": {
+         "datasetName": "ds_sales",
+         "fields": [
+          {
+           "name": "zone",
+           "expression": "`zone`"
+          }
+         ],
+         "disaggregated": false
+        }
+       },
+       {
+        "name": "f_ds_orders_zone",
+        "query": {
+         "datasetName": "ds_orders",
+         "fields": [
+          {
+           "name": "zone",
+           "expression": "`zone`"
+          }
+         ],
+         "disaggregated": false
+        }
+       },
+       {
+        "name": "f_ds_state_map_zone",
+        "query": {
+         "datasetName": "ds_state_map",
+         "fields": [
+          {
+           "name": "zone",
+           "expression": "`zone`"
+          }
+         ],
+         "disaggregated": false
+        }
+       },
+       {
+        "name": "f_ds_festival_zone",
+        "query": {
+         "datasetName": "ds_festival",
+         "fields": [
+          {
+           "name": "zone",
+           "expression": "`zone`"
+          }
+         ],
+         "disaggregated": false
+        }
+       },
+       {
+        "name": "f_ds_festival_daily_zone",
+        "query": {
+         "datasetName": "ds_festival_daily",
+         "fields": [
+          {
+           "name": "zone",
+           "expression": "`zone`"
+          }
+         ],
+         "disaggregated": false
+        }
+       },
+       {
+        "name": "f_ds_forecast_zone",
+        "query": {
+         "datasetName": "ds_forecast",
+         "fields": [
+          {
+           "name": "zone",
+           "expression": "`zone`"
+          }
+         ],
+         "disaggregated": false
+        }
+       },
+       {
+        "name": "f_ds_model_compare_zone",
+        "query": {
+         "datasetName": "ds_model_compare",
+         "fields": [
+          {
+           "name": "zone",
+           "expression": "`zone`"
+          }
+         ],
+         "disaggregated": false
+        }
+       },
+       {
+        "name": "f_ds_accuracy_zone",
+        "query": {
+         "datasetName": "ds_accuracy",
+         "fields": [
+          {
+           "name": "zone",
+           "expression": "`zone`"
+          }
+         ],
+         "disaggregated": false
+        }
+       },
+       {
+        "name": "f_ds_reorder_zone",
+        "query": {
+         "datasetName": "ds_reorder",
+         "fields": [
+          {
+           "name": "zone",
+           "expression": "`zone`"
+          }
+         ],
+         "disaggregated": false
+        }
+       },
+       {
+        "name": "f_ds_inventory_zone",
+        "query": {
+         "datasetName": "ds_inventory",
+         "fields": [
+          {
+           "name": "zone",
+           "expression": "`zone`"
+          }
+         ],
+         "disaggregated": false
+        }
+       },
+       {
+        "name": "f_ds_rfm_zone",
+        "query": {
+         "datasetName": "ds_rfm",
+         "fields": [
+          {
+           "name": "zone",
+           "expression": "`zone`"
+          }
+         ],
+         "disaggregated": false
+        }
+       }
+      ],
+      "spec": {
+       "version": 2,
+       "widgetType": "filter-multi-select",
+       "encodings": {
+        "fields": [
+         {
+          "fieldName": "zone",
+          "queryName": "f_ds_sales_zone"
+         },
+         {
+          "fieldName": "zone",
+          "queryName": "f_ds_orders_zone"
+         },
+         {
+          "fieldName": "zone",
+          "queryName": "f_ds_state_map_zone"
+         },
+         {
+          "fieldName": "zone",
+          "queryName": "f_ds_festival_zone"
+         },
+         {
+          "fieldName": "zone",
+          "queryName": "f_ds_festival_daily_zone"
+         },
+         {
+          "fieldName": "zone",
+          "queryName": "f_ds_forecast_zone"
+         },
+         {
+          "fieldName": "zone",
+          "queryName": "f_ds_model_compare_zone"
+         },
+         {
+          "fieldName": "zone",
+          "queryName": "f_ds_accuracy_zone"
+         },
+         {
+          "fieldName": "zone",
+          "queryName": "f_ds_reorder_zone"
+         },
+         {
+          "fieldName": "zone",
+          "queryName": "f_ds_inventory_zone"
+         },
+         {
+          "fieldName": "zone",
+          "queryName": "f_ds_rfm_zone"
+         }
+        ]
+       },
+       "frame": {
+        "title": "Zone",
+        "showTitle": true
+       }
+      }
+     },
+     "position": {
+      "x": 3,
+      "y": 0,
+      "width": 3,
+      "height": 2
+     }
+    },
+    {
+     "widget": {
+      "name": "filter-44",
+      "queries": [
+       {
+        "name": "f_ds_sales_channel_name",
+        "query": {
+         "datasetName": "ds_sales",
+         "fields": [
+          {
+           "name": "channel_name",
+           "expression": "`channel_name`"
+          }
+         ],
+         "disaggregated": false
+        }
+       },
+       {
+        "name": "f_ds_orders_channel_name",
+        "query": {
+         "datasetName": "ds_orders",
+         "fields": [
+          {
+           "name": "channel_name",
+           "expression": "`channel_name`"
+          }
+         ],
+         "disaggregated": false
+        }
+       },
+       {
+        "name": "f_ds_state_map_channel_name",
+        "query": {
+         "datasetName": "ds_state_map",
+         "fields": [
+          {
+           "name": "channel_name",
+           "expression": "`channel_name`"
+          }
+         ],
+         "disaggregated": false
+        }
+       },
+       {
+        "name": "f_ds_promo_channel_name",
+        "query": {
+         "datasetName": "ds_promo",
+         "fields": [
+          {
+           "name": "channel_name",
+           "expression": "`channel_name`"
+          }
+         ],
+         "disaggregated": false
+        }
+       }
+      ],
+      "spec": {
+       "version": 2,
+       "widgetType": "filter-multi-select",
+       "encodings": {
+        "fields": [
+         {
+          "fieldName": "channel_name",
+          "queryName": "f_ds_sales_channel_name"
+         },
+         {
+          "fieldName": "channel_name",
+          "queryName": "f_ds_orders_channel_name"
+         },
+         {
+          "fieldName": "channel_name",
+          "queryName": "f_ds_state_map_channel_name"
+         },
+         {
+          "fieldName": "channel_name",
+          "queryName": "f_ds_promo_channel_name"
+         }
+        ]
+       },
+       "frame": {
+        "title": "Channel",
+        "showTitle": true
+       }
+      }
+     },
+     "position": {
+      "x": 6,
+      "y": 0,
+      "width": 3,
+      "height": 2
+     }
+    },
+    {
+     "widget": {
+      "name": "filter-45",
+      "queries": [
+       {
+        "name": "f_ds_sales_category",
+        "query": {
+         "datasetName": "ds_sales",
+         "fields": [
+          {
+           "name": "category",
+           "expression": "`category`"
+          }
+         ],
+         "disaggregated": false
+        }
+       },
+       {
+        "name": "f_ds_state_map_category",
+        "query": {
+         "datasetName": "ds_state_map",
+         "fields": [
+          {
+           "name": "category",
+           "expression": "`category`"
+          }
+         ],
+         "disaggregated": false
+        }
+       },
+       {
+        "name": "f_ds_festival_category",
+        "query": {
+         "datasetName": "ds_festival",
+         "fields": [
+          {
+           "name": "category",
+           "expression": "`category`"
+          }
+         ],
+         "disaggregated": false
+        }
+       },
+       {
+        "name": "f_ds_forecast_category",
+        "query": {
+         "datasetName": "ds_forecast",
+         "fields": [
+          {
+           "name": "category",
+           "expression": "`category`"
+          }
+         ],
+         "disaggregated": false
+        }
+       },
+       {
+        "name": "f_ds_model_compare_category",
+        "query": {
+         "datasetName": "ds_model_compare",
+         "fields": [
+          {
+           "name": "category",
+           "expression": "`category`"
+          }
+         ],
+         "disaggregated": false
+        }
+       },
+       {
+        "name": "f_ds_accuracy_category",
+        "query": {
+         "datasetName": "ds_accuracy",
+         "fields": [
+          {
+           "name": "category",
+           "expression": "`category`"
+          }
+         ],
+         "disaggregated": false
+        }
+       },
+       {
+        "name": "f_ds_reorder_category",
+        "query": {
+         "datasetName": "ds_reorder",
+         "fields": [
+          {
+           "name": "category",
+           "expression": "`category`"
+          }
+         ],
+         "disaggregated": false
+        }
+       },
+       {
+        "name": "f_ds_inventory_category",
+        "query": {
+         "datasetName": "ds_inventory",
+         "fields": [
+          {
+           "name": "category",
+           "expression": "`category`"
+          }
+         ],
+         "disaggregated": false
+        }
+       }
+      ],
+      "spec": {
+       "version": 2,
+       "widgetType": "filter-multi-select",
+       "encodings": {
+        "fields": [
+         {
+          "fieldName": "category",
+          "queryName": "f_ds_sales_category"
+         },
+         {
+          "fieldName": "category",
+          "queryName": "f_ds_state_map_category"
+         },
+         {
+          "fieldName": "category",
+          "queryName": "f_ds_festival_category"
+         },
+         {
+          "fieldName": "category",
+          "queryName": "f_ds_forecast_category"
+         },
+         {
+          "fieldName": "category",
+          "queryName": "f_ds_model_compare_category"
+         },
+         {
+          "fieldName": "category",
+          "queryName": "f_ds_accuracy_category"
+         },
+         {
+          "fieldName": "category",
+          "queryName": "f_ds_reorder_category"
+         },
+         {
+          "fieldName": "category",
+          "queryName": "f_ds_inventory_category"
+         }
+        ]
+       },
+       "frame": {
+        "title": "Category",
+        "showTitle": true
+       }
+      }
+     },
+     "position": {
+      "x": 9,
+      "y": 0,
+      "width": 3,
+      "height": 2
+     }
+    },
+    {
+     "widget": {
+      "name": "filter-46",
+      "queries": [
+       {
+        "name": "f_ds_reorder_stockout_risk",
+        "query": {
+         "datasetName": "ds_reorder",
+         "fields": [
+          {
+           "name": "stockout_risk",
+           "expression": "`stockout_risk`"
+          }
+         ],
+         "disaggregated": false
+        }
+       }
+      ],
+      "spec": {
+       "version": 2,
+       "widgetType": "filter-single-select",
+       "encodings": {
+        "fields": [
+         {
+          "fieldName": "stockout_risk",
+          "queryName": "f_ds_reorder_stockout_risk"
+         }
+        ]
+       },
+       "frame": {
+        "title": "Stockout risk",
+        "showTitle": true
+       }
+      }
+     },
+     "position": {
+      "x": 0,
+      "y": 2,
+      "width": 3,
+      "height": 2
+     }
+    },
+    {
+     "widget": {
+      "name": "filter-47",
+      "queries": [
+       {
+        "name": "f_ds_festival_festival_name",
+        "query": {
+         "datasetName": "ds_festival",
+         "fields": [
+          {
+           "name": "festival_name",
+           "expression": "`festival_name`"
+          }
+         ],
+         "disaggregated": false
+        }
+       }
+      ],
+      "spec": {
+       "version": 2,
+       "widgetType": "filter-single-select",
+       "encodings": {
+        "fields": [
+         {
+          "fieldName": "festival_name",
+          "queryName": "f_ds_festival_festival_name"
+         }
+        ]
+       },
+       "frame": {
+        "title": "Festival",
+        "showTitle": true
+       }
+      }
+     },
+     "position": {
+      "x": 3,
+      "y": 2,
+      "width": 3,
+      "height": 2
+     }
+    },
+    {
+     "widget": {
+      "name": "filter-48",
+      "queries": [
+       {
+        "name": "f_ds_sales_fiscal_year",
+        "query": {
+         "datasetName": "ds_sales",
+         "fields": [
+          {
+           "name": "fiscal_year",
+           "expression": "`fiscal_year`"
+          }
+         ],
+         "disaggregated": false
+        }
+       }
+      ],
+      "spec": {
+       "version": 2,
+       "widgetType": "filter-multi-select",
+       "encodings": {
+        "fields": [
+         {
+          "fieldName": "fiscal_year",
+          "queryName": "f_ds_sales_fiscal_year"
+         }
+        ]
+       },
+       "frame": {
+        "title": "Fiscal year",
+        "showTitle": true
+       }
+      }
+     },
+     "position": {
+      "x": 6,
+      "y": 2,
+      "width": 3,
+      "height": 2
+     }
+    },
+    {
+     "widget": {
+      "name": "filter-49",
+      "queries": [
+       {
+        "name": "f_ds_reorder_warehouse_name",
+        "query": {
+         "datasetName": "ds_reorder",
+         "fields": [
+          {
+           "name": "warehouse_name",
+           "expression": "`warehouse_name`"
+          }
+         ],
+         "disaggregated": false
+        }
+       },
+       {
+        "name": "f_ds_inventory_warehouse_name",
+        "query": {
+         "datasetName": "ds_inventory",
+         "fields": [
+          {
+           "name": "warehouse_name",
+           "expression": "`warehouse_name`"
+          }
+         ],
+         "disaggregated": false
+        }
+       }
+      ],
+      "spec": {
+       "version": 2,
+       "widgetType": "filter-multi-select",
+       "encodings": {
+        "fields": [
+         {
+          "fieldName": "warehouse_name",
+          "queryName": "f_ds_reorder_warehouse_name"
+         },
+         {
+          "fieldName": "warehouse_name",
+          "queryName": "f_ds_inventory_warehouse_name"
+         }
+        ]
+       },
+       "frame": {
+        "title": "Warehouse",
+        "showTitle": true
+       }
+      }
+     },
+     "position": {
+      "x": 9,
+      "y": 2,
+      "width": 3,
+      "height": 2
+     }
+    }
+   ]
+  }
+ ],
+ "uiSettings": {
+  "theme": {
+   "canvasBackgroundColor": {
+    "light": "#FBF8F3",
+    "dark": "#1C1A17"
+   },
+   "widgetBackgroundColor": {
+    "light": "#FFFFFF",
+    "dark": "#26231F"
+   },
+   "widgetBorderColor": {
+    "light": "#FFFFFF",
+    "dark": "#26231F"
+   },
+   "fontColor": {
+    "light": "#2B2118",
+    "dark": "#F3EDE4"
+   },
+   "selectionColor": {
+    "light": "#2272B4",
+    "dark": "#8ACAFF"
+   },
+   "visualizationColors": [
+    "#B23A48",
+    "#E9C46A",
+    "#2A9D8F",
+    "#264653",
+    "#F4A261",
+    "#6A4C93",
+    "#8AB17D",
+    "#E76F51"
+   ],
+   "widgetHeaderAlignment": "LEFT",
+   "widgetCornerRadius": 10
+  }
+ }
+}
