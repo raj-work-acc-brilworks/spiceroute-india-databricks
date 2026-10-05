@@ -1,0 +1,25 @@
+# SpiceRoute India — retail lakehouse on Databricks Free Edition
+bundle:
+  name: spiceroute_india
+
+include:
+  - resources/*.yml
+
+variables:
+  catalog:
+    description: Unity Catalog for all SpiceRoute objects (isolated from other projects)
+    default: spiceroute
+  target_lines:
+    description: Number of synthetic sales lines to generate
+    default: "25000000"
+  warehouse_id:
+    description: SQL warehouse for dashboards, alerts and SQL tasks
+    lookup:
+      warehouse: Serverless Starter Warehouse
+
+targets:
+  free:
+    default: true
+    workspace:
+      profile: brilworks
+      root_path: /Workspace/Users/${workspace.current_user.userName}/.bundle/${bundle.name}/${bundle.target}

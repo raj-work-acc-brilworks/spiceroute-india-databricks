@@ -1,0 +1,37 @@
+resources:
+  jobs:
+    spiceroute_generate_data:
+      name: spiceroute_generate_data
+      description: Generate synthetic SpiceRoute India data (dims -> ~25M sales lines -> inventory/POs) into the raw landing volume
+      tags:
+        project: spiceroute
+      max_concurrent_runs: 1
+      parameters:
+        - name: catalog
+          default: ${var.catalog}
+        - name: target_lines
+          default: ${var.target_lines}
+      environments:
+        - environment_key: gen_env
+          spec:
+            client: "4"
+            dependencies:
+              - faker==30.8.2
+      tasks:
+        - task_key: gen_dims
+          environment_key: gen_env
+          spark_python_task:
+            python_file: ../src/01_generate/gen_dims.py
+            parameters: ["--catalog", "{{job.parameters.catalog}}"]
+        - task_key: gen_sales
+          depends_on: [{task_key: gen_dims}]
+          environment_key: gen_env
+          spark_python_task:
+            python_file: ../src/01_generate/gen_sales.py
+            parameters: ["--catalog", "{{job.parameters.catalog}}", "--target_lines", "{{job.parameters.target_lines}}"]
+        - task_key: gen_inventory
+          depends_on: [{task_key: gen_sales}]
+          environment_key: gen_env
+          spark_python_task:
+            python_file: ../src/01_generate/gen_inventory.py
+            parameters: ["--catalog", "{{job.parameters.catalog}}"]

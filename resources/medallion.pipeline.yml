@@ -1,0 +1,19 @@
+resources:
+  pipelines:
+    spiceroute_medallion:
+      name: spiceroute_medallion
+      catalog: ${var.catalog}
+      schema: bronze
+      serverless: true
+      photon: true
+      channel: current
+      continuous: false
+      development: false
+      root_path: ../src/02_pipeline
+      libraries:
+        - glob:
+            include: ../src/02_pipeline/transformations/**
+      configuration:
+        catalog: ${var.catalog}
+      tags:
+        project: spiceroute
