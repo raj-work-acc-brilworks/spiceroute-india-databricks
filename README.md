@@ -17,33 +17,42 @@ The project covers:
 
 ## 📌 Project status (updated 2026-10-05)
 
-| # | Phase | Status | What exists / result |
+All planned phases are built and deployed in the `brilworks` workspace.
+
+| # | Phase | Status | Result |
 |---|---|---|---|
-| 0 | Foundation | ✅ Done | Bundle `spiceroute_india`; catalog `spiceroute` with schemas `bronze`, `silver`, `gold`, `ml`, `semantic`, `synthetic`; volume `bronze.raw_landing` |
-| 1 | Synthetic data generation | ✅ Done | Job `spiceroute_generate_data` (3 serverless tasks). Bronze holds 25.47M raw lines, including injected data-quality issues |
-| 2 | Medallion pipeline | ✅ Done | Pipeline `spiceroute_medallion` (serverless, SQL). Full run takes about 4 min. Gold has 25.18M clean lines |
-| 3 | Semantic layer | ✅ Done | Metric views `sales_metrics`, `order_metrics`, `inventory_metrics`, which reconcile to gold |
-| 4a | `ai_forecast()` baseline | ✅ Done | `ml.ai_forecast_baseline`: 882 series × 12 weeks |
-| 4b | Prophet forecast + backtest + MLflow | 🔄 Re-running | First run failed on a library conflict (`cmdstanpy` 1.3 vs the CmdStan bundled with Prophet). Fixed by pinning `cmdstanpy==1.2.5` |
-| 4c | Reorder recommendations | ⏳ Waits on 4b | `ml.reorder_recommendation`, plus the `ml.reorder_overrides` table for the app |
-| 5 | AI/BI dashboard (6 pages) | 🟡 Built, not deployed | `dashboards/build_dashboard.py` generates the JSON (16 datasets, 6 pages + filters). 12 gold datasets pass `--test`. The 4 ML datasets are waiting on the forecast tables |
-| 6 | Genie space "Ask SpiceRoute" | ⏳ To do | Instructions, trusted SQL, benchmark questions |
-| 7 | Data quality monitoring | 🟡 Partly done | Pipeline expectations and quarantine tables plus `gold.dq_summary` are done. SQL alerts and the Data Health dashboard page are still to do |
-| 8 | Databricks App "Demand Planner" | ⏳ To do | Python (Streamlit) app: forecast explorer, reorder approvals, Genie chat |
-| 9 | End-to-end orchestration job | ⏳ To do | One manually triggered job: generate → pipeline → metric views → forecast → reorder |
-| 10 | Docs | 🟡 This README | The final version will be updated with dashboard, Genie and app links |
+| 0 | Foundation | ✅ | Bundle `spiceroute_india`; catalog `spiceroute` (schemas `bronze`, `silver`, `gold`, `ml`, `semantic`, `synthetic`) |
+| 1 | Synthetic data | ✅ | Job `spiceroute_generate_data`: 25.47M raw lines, 10.4M orders, 1M customers, inventory and purchase orders |
+| 2 | Medallion pipeline | ✅ | Pipeline `spiceroute_medallion` (serverless SQL, about 4 min); 25.18M clean gold lines |
+| 3 | Semantic layer | ✅ | Metric views `sales_metrics`, `order_metrics`, `inventory_metrics` |
+| 4 | Forecasting | ✅ | Prophet for 882 SKU × zone series, plus the `ai_forecast()` baseline and MLflow tracking. Backtest WAPE is **27.1%**, against 31.9% for the seasonal-naive baseline (Prophet wins on 80.5% of series). The plan's ≤20% target was **not** met, see §5 |
+| 4c | Reorder recommendations | ✅ | `ml.reorder_recommendation`: 162 high-risk, 499 medium-risk and 515 low-risk DC × SKU items |
+| 5 | AI/BI dashboard | ✅ | 6 pages plus a filters page, published, with the Genie button linked |
+| 6 | Genie space | ✅ | "Ask SpiceRoute": 16 tables, 3 metric views, 8 example SQL queries (each one tested) and 8 benchmark questions |
+| 7 | Data quality | ✅ | Pipeline expectations and quarantine tables; `gold.dq_summary`; 5-check DQ gate task; 3 SQL alerts (paused) |
+| 8 | Databricks App | ✅ | "Demand Planner" (Streamlit): forecast explorer, reorder approvals saved to `ml.reorder_overrides`, Genie chat |
+| 9 | Orchestration | ✅ | `spiceroute_end_to_end`: one-click manual run, with an optional data rebuild |
+| 10 | Docs | ✅ | This README and `PLAN.md` |
 
-### Remaining work, in order
-1. Finish the Prophet run (fix applied, now re-running), then check WAPE against the seasonal-naive baseline and confirm the MLflow run.
-2. Build the reorder recommendations and check the stockout-risk distribution.
-3. Rerun `python3 dashboards/build_dashboard.py --test` once the ML tables exist, add `resources/dashboard.dashboard.yml` (dataset_catalog `spiceroute`, dataset_schema `gold`), then deploy and publish.
-4. Create the Genie space on the gold tables and metric views, with instructions, sample questions and trusted SQL. Then link it to the dashboard.
-5. Add SQL alerts: high stockout risk, forecast WAPE above 25%, DQ drop rate above 1%.
-6. Build and deploy the Demand Planner app as a bundle resource, and grant its service principal access.
-7. Add the `spiceroute_end_to_end` job and run it once end to end.
-8. Final README pass: links, screenshots or descriptions, and the demo script.
+### 🔗 Links
+| Asset | Link |
+|---|---|
+| Dashboard (published) | https://dbc-821c89ac-7917.cloud.databricks.com/sql/dashboardsv3/01f1c0bd2fb31f4fa957edeceee74365/published |
+| Genie space | https://dbc-821c89ac-7917.cloud.databricks.com/genie/rooms/01f1c0bd7bd6175ba0b691784fd34971 |
+| Demand Planner app | https://spiceroute-demand-planner-7474657342127486.aws.databricksapps.com |
+| MLflow experiment | `/Users/raj.s@brilworks.com/spiceroute/demand_forecast` |
+| Jobs | `spiceroute_end_to_end`, `spiceroute_generate_data`, `spiceroute_forecast` (Workflows UI) |
+| Pipeline | `spiceroute_medallion` |
 
----
+### Known gaps / next ideas
+- **Forecast accuracy.** WAPE is 27% at SKU × zone × week level. Possible improvements:
+  - forecast at base-spice level and reconcile down to SKU (hierarchical forecasting);
+  - add a festival-week lead/lag regressor per zone;
+  - tune `changepoint_prior_scale`;
+  - try LightGBM on lag features.
+- **Forecast intervals.** The 80% intervals cover only about 62% of actuals, so they are too narrow. Increase `interval_width` or calibrate the intervals.
+- **Alerts are paused** to protect the Free Edition quota. The same thresholds are enforced on every manual run by the `dq_checks` task.
+- **The app was checked through its deploy logs only.** Open it once in a browser to confirm the UI.
 
 ## 1. Business story
 
@@ -317,40 +326,153 @@ Design notes:
 | Baselines | Seasonal naive (same week last year); Databricks `ai_forecast()` |
 | Validation | Rolling-origin backtest, 3 folds × 12 weeks; WAPE, bias, 80% interval coverage |
 | Tracking | MLflow experiment `/Users/raj.s@brilworks.com/spiceroute/demand_forecast` |
+| **Backtest result** | WAPE: Prophet **27.1%** vs seasonal naive 31.9%. Bias +1.7%. Prophet beats seasonal naive on **80.5%** of series. 80% interval coverage is 62% |
 | Inventory link | Zone forecast allocated to DCs by recent demand share, giving lead-time demand + safety stock − (on hand + open POs) = reorder quantity and stockout risk |
 
 ---
 
-## 6. Repository layout
+## 6. AI/BI dashboard: "SpiceRoute Commercial Command Center"
+
+Built by `dashboards/build_dashboard.py`, which generates `spiceroute_command_center.lvdash.json`. It's deployed as a bundle resource with `dataset_catalog: spiceroute` and `dataset_schema: gold`. All 16 dataset queries are tested with `--test`.
+
+| Page | Widgets |
+|---|---|
+| 1 · Executive Overview | KPI sparklines (net revenue, GM %, orders, AOV); monthly revenue by channel group with Diwali markers; channel mix; revenue by zone; top spices; GM % by category |
+| 2 · Product & Region | Category × zone heatmap; state bubble map; spice × zone volume pivot; volume by season |
+| 3 · Festivals & Promotions | Daily revenue by zone with festival markers; biggest festival uplifts; promotion lift table; promo revenue share by channel |
+| 4 · Demand Forecast | WAPE KPIs; actuals + Prophet forecast-line with 80% band; Prophet vs `ai_forecast()` vs seasonal naive; WAPE by category |
+| 5 · Inventory & Supply | Fill-rate and high-risk KPIs; chilli vs other fill rate (crop-failure marker); chilli margin squeeze with MRP-hike marker; stockout days by DC; supplier scorecard; colour-coded reorder table |
+| 6 · Customers & Data Health | RFM segments; customer value by loyalty tier; rows through the medallion layers; DQ outcomes by reason |
+| Filters | Date, zone, channel, category, stockout risk, festival, fiscal year, warehouse |
+
+## 7. Genie space: "Ask SpiceRoute"
+
+Built by `src/05_genie/build_genie_space.py`. Use `--test` to run every example SQL query and `--deploy` to create or update the space.
+
+- **Data:** 16 gold and ml tables plus the 3 metric views. Entity matching is switched on for spice, zone, channel, festival, DC and risk columns.
+- **Instructions:**
+  - revenue = net of GST, delivered orders only;
+  - FY = April–March (labelled FY25-26);
+  - lakh and crore conversions;
+  - chilli = `RCH`/`KCH`;
+  - "DC" = warehouse;
+  - prefer metric views and aggregate tables, never the 25M-row fact table.
+- **Example and benchmark questions:**
+  - Net revenue by zone in FY25-26 in crores
+  - Which spices grew most during Diwali 2025 vs 2024
+  - Which SKUs are at high stockout risk at the Chennai DC
+  - How the 2024 chilli shortage affected margin
+  - Top promotions by lift
+  - Garam masala forecast in the North
+  - Online revenue share by year
+- **Test:** asked "Which zone had the highest gross margin % in FY25-26?", Genie correctly used `MEASURE(\`Gross Margin Pct\`)` on `semantic.sales_metrics`.
+
+## 8. Databricks App: "SpiceRoute Demand Planner"
+
+`app/` is a Streamlit app, deployed as a bundle resource. Its resources are the SQL warehouse (`CAN_USE`) and the Genie space (`CAN_RUN`). The app's service principal has `SELECT` on `gold`, `ml` and `semantic`, plus `MODIFY` on `ml.reorder_overrides`.
+
+```mermaid
+flowchart LR
+    U[Planner] --> T1[📈 Forecast explorer<br/>zone · spice · SKU]
+    U --> T2[📦 Reorder planner<br/>approve / modify / reject]
+    U --> T3[💬 Ask Genie]
+    T1 -->|SQL| W[(SQL warehouse)]
+    T2 -->|SQL read + INSERT| W
+    W --> ML[(ml.demand_forecast<br/>ml.ai_forecast_baseline<br/>ml.forecast_accuracy<br/>ml.reorder_recommendation)]
+    W --> OV[(ml.reorder_overrides)]
+    T3 -->|Conversation API| G[Genie: Ask SpiceRoute]
+```
+
+- **Forecast explorer:** actuals vs Prophet (with 80% band), `ai_forecast()` and seasonal naive, plus backtest WAPE for the current selection.
+- **Reorder planner:** editable table of recommendations. Decisions are stored with the planner's email and a timestamp, and the latest decision is shown next to each item.
+- **Ask Genie:** chat that shows Genie's answer, the result table and the generated SQL.
+
+## 9. Data quality & orchestration
+
+```mermaid
+flowchart TD
+    C{regenerate = true?}
+    C -- yes --> GD[generate_data<br/>run_job: spiceroute_generate_data]
+    GD --> PF[pipeline_full_refresh]
+    C -- no --> PR[pipeline_refresh]
+    PF --> MV[metric_views<br/>SQL file]
+    PR --> MV
+    MV --> FC[forecast<br/>run_job: spiceroute_forecast<br/>Prophet ∥ ai_forecast → reorder]
+    FC --> DQ[dq_checks<br/>5 gates, raise_error on breach]
+```
+
+| Layer | Mechanism |
+|---|---|
+| Silver | Expectations (`ON VIOLATION DROP ROW`); rejects land in `orders_quarantine` / `sales_lines_quarantine` |
+| Gold | `dq_summary`: quarantined rows by reason, late-arriving lines, corrected state names |
+| Gate (`dq_checks.sql`) | Reject rate ≤ 1%; no orphan SKUs in the fact table; metric view = gold revenue; freshness (actuals reach 2026-09-30); 12 forecast weeks present |
+| Alerts (paused) | High-risk items > 100; backtest WAPE > 30%; DQ reject rate > 1%. Email goes to the deployer |
+
+## 10. Repository layout
 
 ```
 db-prac/
-├── databricks.yml                     bundle (target free → profile brilworks)
-├── PLAN.md                            original plan
-├── README.md                          this file
+├── databricks.yml                         bundle (target free → profile brilworks)
+├── PLAN.md · README.md
 ├── resources/
-│   ├── generate_data.job.yml          job: synthetic data (3 tasks)
-│   ├── medallion.pipeline.yml         Lakeflow Declarative Pipeline
-│   └── forecast.job.yml               job: Prophet + ai_forecast + reorder; MLflow experiment
-└── src/
-    ├── 01_generate/                   spice_common.py · gen_dims.py · gen_sales.py · gen_inventory.py
-    ├── 02_pipeline/transformations/   01_bronze.sql · 02_silver.sql · 03_gold_dims.sql · 04_gold_facts.sql · 05_gold_aggregates.sql
-    ├── 03_forecast/                   train_forecast.py · ai_forecast_baseline.sql · reorder_recommendations.py
-    └── 04_semantic/                   metric_views.sql
+│   ├── generate_data.job.yml              synthetic data job (3 tasks)
+│   ├── medallion.pipeline.yml             Lakeflow Declarative Pipeline
+│   ├── forecast.job.yml                   Prophet + ai_forecast + reorder
+│   ├── demand_forecast.experiment.yml     MLflow experiment
+│   ├── command_center.dashboard.yml       AI/BI dashboard
+│   ├── quality.alerts.yml                 3 SQL alerts (paused)
+│   ├── demand_planner.app.yml             Databricks App
+│   └── end_to_end.job.yml                 one-click orchestration
+├── src/
+│   ├── 01_generate/                       spice_common.py · gen_dims.py · gen_sales.py · gen_inventory.py
+│   ├── 02_pipeline/transformations/       01_bronze.sql … 05_gold_aggregates.sql
+│   ├── 03_forecast/                       train_forecast.py · ai_forecast_baseline.sql · reorder_recommendations.py
+│   ├── 04_semantic/                       metric_views.sql
+│   ├── 05_genie/                          build_genie_space.py · genie_space.json
+│   └── 06_quality/                        dq_checks.sql
+├── dashboards/                            build_dashboard.py · spiceroute_command_center.lvdash.json
+└── app/                                   app.py · app.yaml · requirements.txt
 ```
 
-## 7. How to run
+## 11. How to run
 
 ```bash
 databricks bundle validate --strict --profile brilworks
 databricks bundle deploy --profile brilworks
-databricks bundle run spiceroute_generate_data --profile brilworks      # ~15 min, 25M lines
-databricks bundle run spiceroute_medallion --profile brilworks          # ~4 min
+
+# everything, reusing the existing data (~15 min)
+databricks bundle run spiceroute_end_to_end --profile brilworks
+# everything, rebuilding the 25M-line dataset first (~35 min)
+databricks bundle run spiceroute_end_to_end --params regenerate=true --profile brilworks
+
+# individual pieces
+databricks bundle run spiceroute_generate_data --params target_lines=500000 --profile brilworks   # small test set
+databricks bundle run spiceroute_medallion --profile brilworks
 databricks bundle run spiceroute_forecast --profile brilworks
+databricks bundle run spiceroute_demand_planner --profile brilworks                             # (re)deploy app source
+
+# dashboard / Genie definitions are generated from code
+python3 dashboards/build_dashboard.py --test && databricks bundle deploy --profile brilworks
+python3 src/05_genie/build_genie_space.py --test
+GENIE_SPACE_ID=01f1c0bd7bd6175ba0b691784fd34971 python3 src/05_genie/build_genie_space.py --deploy
 ```
 
-Small test run: `databricks bundle run spiceroute_generate_data --params target_lines=500000 --profile brilworks`.
+**Gotchas:**
+- **Prophet on serverless:** pin `cmdstanpy==1.2.5`. Version 1.3.x rejects the CmdStan bundled in the prophet 1.1.6 wheel ("missing makefile").
+- **Metric-view YAML:** submit it through the SQL warehouse (job `sql_task` or the Statement Execution API). The `aitools query` helper strips indentation and breaks the YAML.
+- **Regenerating data:** raw files are overwritten in place, so the pipeline needs a **full refresh** afterwards. The end-to-end job does this automatically when `regenerate=true`.
 
-After regenerating the data, run the pipeline with a full refresh (`--full-refresh-all`), because the raw files are overwritten in place.
+**Teardown:**
+1. Run `databricks bundle destroy --profile brilworks`.
+2. Run `DROP CATALOG spiceroute CASCADE`.
+3. Delete the Genie space in the UI.
 
-Teardown: `databricks bundle destroy --profile brilworks`, then run `DROP CATALOG spiceroute CASCADE`.
+## 12. Demo script (10 minutes)
+
+1. **Dashboard, page 1:** ₹484 cr in FY25-26 (+18%). General Trade is the core channel, but online is growing fastest. Diwali markers show the festive peaks.
+2. **Page 2:** regional taste. Sambar is big in the South, panch phoron in the East, goda masala in the West.
+3. **Page 5:** the 2024 chilli crop failure. Fill rate collapses in South and West DCs, the margin squeeze is visible, and margin recovers after the MRP hike. The supplier scorecard shows the grade-C alternate supplier.
+4. **Page 4:** Prophet forecast with festival effects, which beats the seasonal baseline on 80% of series.
+5. **Ask Genie:** "Which SKUs are at high risk of stockout at the Chennai DC?"
+6. **Demand Planner app:** filter Chennai / High, approve or modify the order quantities, and show the saved rows in `ml.reorder_overrides`.
+7. **Lineage:** show Unity Catalog lineage from `bronze.sales_lines_raw` through to `semantic.sales_metrics`, plus the DQ gate in the end-to-end job run.
