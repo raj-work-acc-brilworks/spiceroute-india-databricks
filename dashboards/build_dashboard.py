@@ -86,7 +86,7 @@ FROM ml.forecast_accuracy WHERE actual_units > 0""", [
         ("WAPE Seasonal Naive", "SUM(`abs_err_snaive`) / SUM(`actual_units`)"),
     ]),
     "ds_reorder": ("Reorder recommendations", """
-SELECT warehouse_name, w.zone, r.sku_id, product_name, base_spice, category, on_hand_units, open_po_units, forecast_next_4w_units,
+SELECT r.warehouse_name, w.zone, r.sku_id, r.product_name, base_spice, category, on_hand_units, open_po_units, forecast_next_4w_units,
        weeks_of_cover, lead_time_weeks, safety_stock_units, recommended_order_units, stockout_risk, projected_stockout_date,
        forecast_revenue_4w_inr
 FROM ml.reorder_recommendation r JOIN dim_warehouse w ON r.warehouse_id = w.warehouse_id""", []),
@@ -258,8 +258,8 @@ L = [
     chart("bar", "ds_sales", "Net revenue by zone", cat("zone", "Zone"), quant("sum(net_revenue_inr)", "Net revenue", INR),
           [F("zone"), SUM("net_revenue_inr")], 0, 11, 4, 6, orders=[{"direction": "DESC", "expression": "SUM(`net_revenue_inr`)"}]),
     chart("bar", "ds_sales", "Top base spices by revenue", quant("sum(net_revenue_inr)", "Net revenue", INR),
-          {"fieldName": "base_spice", "scale": {"type": "categorical", "sort": {"by": "x-reversed"}}, "displayName": "Spice"},
-          [F("base_spice"), SUM("net_revenue_inr")], 4, 11, 4, 6),
+          {"fieldName": "base_spice", "scale": {"type": "categorical"}, "displayName": "Spice"},
+          [F("base_spice"), SUM("net_revenue_inr")], 4, 11, 4, 6, orders=[{"direction": "DESC", "expression": "SUM(`net_revenue_inr`)"}]),
     chart("line", "ds_sales", "Gross margin % by category", temporal("monthly(order_date)", "Month"),
           quant("measure(Gross Margin %)", "Gross margin", PCT), [MON("order_date"), M("Gross Margin %"), F("category")],
           8, 11, 4, 6, color=cat("category", "Category")),
@@ -287,7 +287,7 @@ L = [
            "spec": {"version": 3, "widgetType": "pivot", "frame": {"title": "Volume (kg): spice × zone", "showTitle": True},
                     "encodings": {"rows": [{"fieldName": "base_spice", "displayName": "Spice"}],
                                   "columns": [{"fieldName": "zone", "displayName": "Zone"}],
-                                  "cell": {"type": "multi-cell", "fields": [{"fieldName": "sum(volume_kg)", "cellType": "text", "displayName": "kg",
+                                  "cell": {"type": "multi-cell", "fields": [{"fieldName": "sum(volume_kg)", "cellType": "color-scale", "displayName": "kg",
                                                                              "format": NUM}]}}}}, 0, 7, 8, 8),
     chart("bar", "ds_sales", "Volume by season and category", cat("season", "Season"), quant("sum(volume_kg)", "Volume (kg)", NUM),
           [F("season"), SUM("volume_kg"), F("category")], 8, 7, 4, 8, color=cat("category", "Category")),
@@ -407,7 +407,7 @@ L = [
     chart("bar", "ds_layers", "Order lines through the medallion layers", cat("layer", "Layer"), quant("sum(rows)", "Rows", NUM),
           [F("layer"), SUM("rows")], 0, 7, 6, 6),
     chart("bar", "ds_dq", "Data-quality outcomes by reason", quant("sum(rows)", "Rows", NUM),
-          {"fieldName": "dq_reason", "scale": {"type": "categorical", "sort": {"by": "x-reversed"}}, "displayName": "Reason"},
+          {"fieldName": "dq_reason", "scale": {"type": "categorical"}, "displayName": "Reason"},
           [F("dq_reason"), SUM("rows"), F("outcome")], 6, 7, 6, 6,
           color={"fieldName": "outcome", "scale": {"type": "categorical", "mappings": [{"value": "Rejected (quarantined)", "color": BAD}, {"value": "Accepted (flagged)", "color": GOOD}]}, "displayName": "Outcome"}),
 ]
@@ -455,7 +455,7 @@ dash = {
         "visualizationColors": ["#B23A48", "#E9C46A", "#2A9D8F", "#264653", "#F4A261", "#6A4C93", "#8AB17D", "#E76F51"],
         "widgetHeaderAlignment": "LEFT", "widgetCornerRadius": 10}},
 }
-genie_id = os.environ.get("GENIE_SPACE_ID")
+genie_id = os.environ.get("GENIE_SPACE_ID", "01f1c0bd7bd6175ba0b691784fd34971")  # "Ask SpiceRoute"
 if genie_id:
     dash["uiSettings"]["genieSpace"] = {"isEnabled": True, "overrideId": genie_id, "enablementMode": "ENABLED"}
 

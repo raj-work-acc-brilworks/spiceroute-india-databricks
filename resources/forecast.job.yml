@@ -1,8 +1,4 @@
 resources:
-  experiments:
-    spiceroute_demand_forecast:
-      name: /Users/${workspace.current_user.userName}/spiceroute/demand_forecast
-
   jobs:
     spiceroute_forecast:
       name: spiceroute_forecast

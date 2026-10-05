@@ -1,0 +1,9 @@
+resources:
+  dashboards:
+    spiceroute_command_center:
+      display_name: SpiceRoute Commercial Command Center
+      file_path: ../dashboards/spiceroute_command_center.lvdash.json
+      warehouse_id: ${var.warehouse_id}
+      dataset_catalog: ${var.catalog}
+      dataset_schema: gold
+      embed_credentials: true

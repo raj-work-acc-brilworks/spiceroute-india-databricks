@@ -151,7 +151,7 @@
    "name": "ds_reorder",
    "displayName": "Reorder recommendations",
    "queryLines": [
-    "SELECT warehouse_name, w.zone, r.sku_id, product_name, base_spice, category, on_hand_units, open_po_units, forecast_next_4w_units,\n",
+    "SELECT r.warehouse_name, w.zone, r.sku_id, r.product_name, base_spice, category, on_hand_units, open_po_units, forecast_next_4w_units,\n",
     "       weeks_of_cover, lead_time_weeks, safety_stock_units, recommended_order_units, stockout_risk, projected_stockout_date,\n",
     "       forecast_revenue_4w_inr\n",
     "FROM ml.reorder_recommendation r JOIN dim_warehouse w ON r.warehouse_id = w.warehouse_id\n"
@@ -749,7 +749,13 @@
            "expression": "SUM(`net_revenue_inr`)"
           }
          ],
-         "disaggregated": false
+         "disaggregated": false,
+         "orders": [
+          {
+           "direction": "DESC",
+           "expression": "SUM(`net_revenue_inr`)"
+          }
+         ]
         }
        }
       ],
@@ -776,10 +782,7 @@
         "y": {
          "fieldName": "base_spice",
          "scale": {
-          "type": "categorical",
-          "sort": {
-           "by": "x-reversed"
-          }
+          "type": "categorical"
          },
          "displayName": "Spice"
         }
@@ -1108,7 +1111,7 @@
          "fields": [
           {
            "fieldName": "sum(volume_kg)",
-           "cellType": "text",
+           "cellType": "color-scale",
            "displayName": "kg",
            "format": {
             "type": "number",
@@ -3165,10 +3168,7 @@
         "y": {
          "fieldName": "dq_reason",
          "scale": {
-          "type": "categorical",
-          "sort": {
-           "by": "x-reversed"
-          }
+          "type": "categorical"
          },
          "displayName": "Reason"
         },
@@ -3992,6 +3992,11 @@
    ],
    "widgetHeaderAlignment": "LEFT",
    "widgetCornerRadius": 10
+  },
+  "genieSpace": {
+   "isEnabled": true,
+   "overrideId": "01f1c0bd7bd6175ba0b691784fd34971",
+   "enablementMode": "ENABLED"
   }
  }
 }

@@ -1,0 +1,444 @@
+{
+ "version": 2,
+ "config": {
+  "sample_questions": [
+   {
+    "id": "10000000000000000000000000000001",
+    "question": [
+     "What was net revenue by zone in FY25-26, in crores?"
+    ]
+   },
+   {
+    "id": "10000000000000000000000000000002",
+    "question": [
+     "Which spices grew the most during Diwali 2025 vs 2024?"
+    ]
+   },
+   {
+    "id": "10000000000000000000000000000003",
+    "question": [
+     "Which SKUs are at high risk of stockout at the Chennai DC?"
+    ]
+   },
+   {
+    "id": "10000000000000000000000000000004",
+    "question": [
+     "How did the 2024 chilli shortage affect gross margin?"
+    ]
+   },
+   {
+    "id": "10000000000000000000000000000005",
+    "question": [
+     "What is the forecast demand for Garam Masala in the North over the next 12 weeks?"
+    ]
+   }
+  ]
+ },
+ "data_sources": {
+  "tables": [
+   {
+    "identifier": "spiceroute.gold.agg_customer_rfm",
+    "description": [
+     "RFM segment per identified consumer."
+    ]
+   },
+   {
+    "identifier": "spiceroute.gold.agg_festival_uplift",
+    "description": [
+     "Festival effect: avg daily revenue in the 10 days up to a festival vs a days -60..-31 baseline, per zone and spice."
+    ],
+    "column_configs": [
+     {
+      "column_name": "base_spice",
+      "enable_format_assistance": true,
+      "enable_entity_matching": true
+     },
+     {
+      "column_name": "festival_name",
+      "enable_format_assistance": true,
+      "enable_entity_matching": true
+     },
+     {
+      "column_name": "zone",
+      "enable_format_assistance": true,
+      "enable_entity_matching": true
+     }
+    ]
+   },
+   {
+    "identifier": "spiceroute.gold.agg_inventory_weekly",
+    "description": [
+     "Weekly warehouse x SKU service level: demand, shipped, stockout days, fill rate."
+    ]
+   },
+   {
+    "identifier": "spiceroute.gold.agg_margin_monthly",
+    "description": [
+     "Monthly revenue and gross margin per base spice with the raw-material price index."
+    ]
+   },
+   {
+    "identifier": "spiceroute.gold.agg_promo_effectiveness",
+    "description": [
+     "Promotion lift: avg daily channel revenue during a promotion vs the 28 days before."
+    ]
+   },
+   {
+    "identifier": "spiceroute.gold.agg_sales_daily",
+    "description": [
+     "Daily sales by SKU x zone x channel (delivered orders). Primary table for revenue/volume/margin questions."
+    ],
+    "column_configs": [
+     {
+      "column_name": "base_spice",
+      "enable_format_assistance": true,
+      "enable_entity_matching": true
+     },
+     {
+      "column_name": "category",
+      "enable_format_assistance": true,
+      "enable_entity_matching": true
+     },
+     {
+      "column_name": "channel_group",
+      "enable_format_assistance": true,
+      "enable_entity_matching": true
+     },
+     {
+      "column_name": "channel_name",
+      "enable_format_assistance": true,
+      "enable_entity_matching": true
+     },
+     {
+      "column_name": "zone",
+      "enable_format_assistance": true,
+      "enable_entity_matching": true
+     }
+    ]
+   },
+   {
+    "identifier": "spiceroute.gold.agg_sales_monthly",
+    "description": [
+     "Monthly sales by category x state x channel; use for state-level questions."
+    ]
+   },
+   {
+    "identifier": "spiceroute.gold.dim_date",
+    "description": [
+     "Calendar with Indian fiscal year (Apr-Mar), season and festival names."
+    ]
+   },
+   {
+    "identifier": "spiceroute.gold.dim_product",
+    "description": [
+     "SKU master: base spice, category, pack size, organic flag, MRP."
+    ],
+    "column_configs": [
+     {
+      "column_name": "base_spice",
+      "enable_format_assistance": true,
+      "enable_entity_matching": true
+     },
+     {
+      "column_name": "category",
+      "enable_format_assistance": true,
+      "enable_entity_matching": true
+     }
+    ]
+   },
+   {
+    "identifier": "spiceroute.gold.dim_store",
+    "description": [
+     "Stores / trade accounts / online storefronts."
+    ]
+   },
+   {
+    "identifier": "spiceroute.gold.dim_warehouse",
+    "description": [
+     "Distribution centres (DCs)."
+    ],
+    "column_configs": [
+     {
+      "column_name": "warehouse_name",
+      "enable_format_assistance": true,
+      "enable_entity_matching": true
+     },
+     {
+      "column_name": "zone",
+      "enable_format_assistance": true,
+      "enable_entity_matching": true
+     }
+    ]
+   },
+   {
+    "identifier": "spiceroute.gold.fact_purchase_orders",
+    "description": [
+     "Purchase orders to spice suppliers incl. quality grade and delays."
+    ]
+   },
+   {
+    "identifier": "spiceroute.gold.fact_returns",
+    "description": [
+     "Product returns with reason."
+    ]
+   },
+   {
+    "identifier": "spiceroute.ml.demand_forecast",
+    "description": [
+     "Prophet 12-week weekly unit forecast per SKU x zone (from week of 2026-09-28)."
+    ]
+   },
+   {
+    "identifier": "spiceroute.ml.forecast_accuracy",
+    "description": [
+     "Backtest accuracy per SKU x zone: WAPE of Prophet vs seasonal naive."
+    ]
+   },
+   {
+    "identifier": "spiceroute.ml.reorder_recommendation",
+    "description": [
+     "Reorder recommendation and stockout risk per DC x SKU as of 2026-09-30."
+    ],
+    "column_configs": [
+     {
+      "column_name": "base_spice",
+      "enable_format_assistance": true,
+      "enable_entity_matching": true
+     },
+     {
+      "column_name": "stockout_risk",
+      "enable_format_assistance": true,
+      "enable_entity_matching": true
+     },
+     {
+      "column_name": "warehouse_name",
+      "enable_format_assistance": true,
+      "enable_entity_matching": true
+     }
+    ]
+   }
+  ],
+  "metric_views": [
+   {
+    "identifier": "spiceroute.semantic.inventory_metrics"
+   },
+   {
+    "identifier": "spiceroute.semantic.order_metrics"
+   },
+   {
+    "identifier": "spiceroute.semantic.sales_metrics"
+   }
+  ]
+ },
+ "instructions": {
+  "text_instructions": [
+   {
+    "id": "30000000000000000000000000000006",
+    "content": [
+     "SpiceRoute India is a fictional Indian packaged-spice company. Data covers 2023-10-01 to 2026-09-30 (actuals); forecasts extend 12 weeks after.\n",
+     "Definitions:\n",
+     "- Revenue / sales = net revenue in INR EXCLUDING GST (column net_revenue_inr, or MEASURE(`Net Revenue`) in spiceroute.semantic.sales_metrics). Only delivered orders count.\n",
+     "- Gross margin = net revenue minus COGS. Gross margin % = gross margin / net revenue.\n",
+     "- Amounts: 1 lakh = 100,000 INR; 1 crore = 10,000,000 INR. When the user says \"in crores\" divide by 1e7 and round to 2 decimals.\n",
+     "- Fiscal year is April to March, labelled like FY25-26 (= 2025-04-01 to 2026-03-31). Use gold.dim_date.fiscal_year. \"This year\" means FY26-27 (partial, Apr-Sep 2026); \"last year\" means FY25-26.\n",
+     "- Zones: North, South, East, West, Central, North-East. Channels: General Trade, Modern Trade, Own Retail, HoReCa, Quick Commerce, Marketplace, D2C Website. Channel groups: Offline, Online, B2B.\n",
+     "- A \"spice\" usually means base_spice (e.g. 'Red Chilli Powder', 'Garam Masala'); a \"product\" or \"SKU\" means sku_id / product_name (base spice + pack size).\n",
+     "- Chilli products are base_spice_code IN ('RCH','KCH') (Red Chilli Powder, Kashmiri Chilli Powder). In 2024 (Jun-Oct) a chilli crop failure caused stockouts, a low-grade alternate supplier (quality grade C), more quality returns and a margin squeeze.\n",
+     "- Stockout risk questions: use spiceroute.ml.reorder_recommendation (stockout_risk High/Medium/Low, weeks_of_cover, recommended_order_units). Warehouses are called DCs; match names with LIKE, e.g. warehouse_name LIKE '%Chennai%'.\n",
+     "- Forecast questions: use spiceroute.ml.demand_forecast (forecast_units per week_start) joined to gold.dim_product on sku_id.\n",
+     "- Prefer the metric views (MEASURE() syntax) for KPI questions; prefer agg tables for festival, promo, inventory and forecast questions. Never query fact_sales_line (25M rows) when an aggregate answers the question.\n"
+    ]
+   }
+  ],
+  "example_question_sqls": [
+   {
+    "id": "20000000000000000000000000000007",
+    "question": [
+     "What was net revenue by zone in FY25-26, in crores?"
+    ],
+    "sql": [
+     "SELECT `Zone`, ROUND(MEASURE(`Net Revenue`) / 1e7, 2) AS net_revenue_cr\nFROM spiceroute.semantic.sales_metrics WHERE `Fiscal Year` = 'FY25-26' GROUP BY `Zone` ORDER BY net_revenue_cr DESC"
+    ]
+   },
+   {
+    "id": "20000000000000000000000000000008",
+    "question": [
+     "How did revenue and gross margin trend by fiscal year?"
+    ],
+    "sql": [
+     "SELECT `Fiscal Year`, ROUND(MEASURE(`Net Revenue`) / 1e7, 2) AS net_revenue_cr, ROUND(MEASURE(`Gross Margin Pct`) * 100, 1) AS gross_margin_pct\nFROM spiceroute.semantic.sales_metrics GROUP BY `Fiscal Year` ORDER BY `Fiscal Year`"
+    ]
+   },
+   {
+    "id": "20000000000000000000000000000009",
+    "question": [
+     "Which spices grew the most during Diwali 2025 compared with Diwali 2024?"
+    ],
+    "sql": [
+     "WITH d AS (\n  SELECT base_spice, year, SUM(festival_daily_revenue_inr) AS festival_daily_revenue_inr\n  FROM spiceroute.gold.agg_festival_uplift WHERE festival_name = 'Diwali' AND year IN (2024, 2025) GROUP BY ALL)\nSELECT base_spice,\n       ROUND(MAX(CASE WHEN year = 2024 THEN festival_daily_revenue_inr END)) AS diwali_2024_daily_inr,\n       ROUND(MAX(CASE WHEN year = 2025 THEN festival_daily_revenue_inr END)) AS diwali_2025_daily_inr,\n       ROUND(100 * (MAX(CASE WHEN year = 2025 THEN festival_daily_revenue_inr END) / MAX(CASE WHEN year = 2024 THEN festival_daily_revenue_inr END) - 1), 1) AS growth_pct\nFROM d GROUP BY base_spice ORDER BY growth_pct DESC LIMIT 10"
+    ]
+   },
+   {
+    "id": "2000000000000000000000000000000a",
+    "question": [
+     "Which SKUs are at high risk of stockout at the Chennai DC?"
+    ],
+    "sql": [
+     "SELECT product_name, on_hand_units, open_po_units, forecast_next_4w_units, weeks_of_cover, recommended_order_units, projected_stockout_date\nFROM spiceroute.ml.reorder_recommendation\nWHERE warehouse_name LIKE '%Chennai%' AND stockout_risk = 'High' ORDER BY weeks_of_cover"
+    ]
+   },
+   {
+    "id": "2000000000000000000000000000000b",
+    "question": [
+     "How did the 2024 chilli shortage affect gross margin?"
+    ],
+    "sql": [
+     "SELECT month, CASE WHEN base_spice_code IN ('RCH', 'KCH') THEN 'Chilli' ELSE 'Other spices' END AS spice_group,\n       ROUND(100 * SUM(gross_margin_inr) / SUM(net_revenue_inr), 1) AS gross_margin_pct, ROUND(AVG(raw_material_index), 2) AS raw_material_index\nFROM spiceroute.gold.agg_margin_monthly WHERE month BETWEEN '2024-01-01' AND '2025-06-01' GROUP BY ALL ORDER BY month, spice_group"
+    ]
+   },
+   {
+    "id": "2000000000000000000000000000000c",
+    "question": [
+     "What were the top 5 promotions by revenue lift?"
+    ],
+    "sql": [
+     "SELECT promo_name, channel_code, discount_pct, revenue_lift_pct, discount_cost_inr\nFROM spiceroute.gold.agg_promo_effectiveness WHERE baseline_daily_revenue_inr IS NOT NULL ORDER BY revenue_lift_pct DESC LIMIT 5"
+    ]
+   },
+   {
+    "id": "2000000000000000000000000000000d",
+    "question": [
+     "What is the forecast demand for Garam Masala in the North over the next 12 weeks?"
+    ],
+    "sql": [
+     "SELECT f.week_start, ROUND(SUM(f.forecast_units)) AS forecast_units, ROUND(SUM(f.forecast_lower)) AS lower_80, ROUND(SUM(f.forecast_upper)) AS upper_80\nFROM spiceroute.ml.demand_forecast f JOIN spiceroute.gold.dim_product p ON f.sku_id = p.sku_id\nWHERE p.base_spice = 'Garam Masala' AND f.zone = 'North' GROUP BY f.week_start ORDER BY f.week_start"
+    ]
+   },
+   {
+    "id": "2000000000000000000000000000000e",
+    "question": [
+     "What share of revenue comes from online channels each fiscal year?"
+    ],
+    "sql": [
+     "SELECT `Fiscal Year`, `Channel Group`, ROUND(MEASURE(`Net Revenue`) / 1e7, 2) AS net_revenue_cr\nFROM spiceroute.semantic.sales_metrics GROUP BY ALL ORDER BY `Fiscal Year`, `Channel Group`"
+    ]
+   }
+  ]
+ },
+ "benchmarks": {
+  "questions": [
+   {
+    "id": "4000000000000000000000000000000f",
+    "question": [
+     "What was net revenue by zone in FY25-26, in crores?"
+    ],
+    "answer": [
+     {
+      "format": "SQL",
+      "content": [
+       "SELECT `Zone`, ROUND(MEASURE(`Net Revenue`) / 1e7, 2) AS net_revenue_cr\nFROM spiceroute.semantic.sales_metrics WHERE `Fiscal Year` = 'FY25-26' GROUP BY `Zone` ORDER BY net_revenue_cr DESC"
+      ]
+     }
+    ]
+   },
+   {
+    "id": "40000000000000000000000000000010",
+    "question": [
+     "How did revenue and gross margin trend by fiscal year?"
+    ],
+    "answer": [
+     {
+      "format": "SQL",
+      "content": [
+       "SELECT `Fiscal Year`, ROUND(MEASURE(`Net Revenue`) / 1e7, 2) AS net_revenue_cr, ROUND(MEASURE(`Gross Margin Pct`) * 100, 1) AS gross_margin_pct\nFROM spiceroute.semantic.sales_metrics GROUP BY `Fiscal Year` ORDER BY `Fiscal Year`"
+      ]
+     }
+    ]
+   },
+   {
+    "id": "40000000000000000000000000000011",
+    "question": [
+     "Which spices grew the most during Diwali 2025 compared with Diwali 2024?"
+    ],
+    "answer": [
+     {
+      "format": "SQL",
+      "content": [
+       "WITH d AS (\n  SELECT base_spice, year, SUM(festival_daily_revenue_inr) AS festival_daily_revenue_inr\n  FROM spiceroute.gold.agg_festival_uplift WHERE festival_name = 'Diwali' AND year IN (2024, 2025) GROUP BY ALL)\nSELECT base_spice,\n       ROUND(MAX(CASE WHEN year = 2024 THEN festival_daily_revenue_inr END)) AS diwali_2024_daily_inr,\n       ROUND(MAX(CASE WHEN year = 2025 THEN festival_daily_revenue_inr END)) AS diwali_2025_daily_inr,\n       ROUND(100 * (MAX(CASE WHEN year = 2025 THEN festival_daily_revenue_inr END) / MAX(CASE WHEN year = 2024 THEN festival_daily_revenue_inr END) - 1), 1) AS growth_pct\nFROM d GROUP BY base_spice ORDER BY growth_pct DESC LIMIT 10"
+      ]
+     }
+    ]
+   },
+   {
+    "id": "40000000000000000000000000000012",
+    "question": [
+     "Which SKUs are at high risk of stockout at the Chennai DC?"
+    ],
+    "answer": [
+     {
+      "format": "SQL",
+      "content": [
+       "SELECT product_name, on_hand_units, open_po_units, forecast_next_4w_units, weeks_of_cover, recommended_order_units, projected_stockout_date\nFROM spiceroute.ml.reorder_recommendation\nWHERE warehouse_name LIKE '%Chennai%' AND stockout_risk = 'High' ORDER BY weeks_of_cover"
+      ]
+     }
+    ]
+   },
+   {
+    "id": "40000000000000000000000000000013",
+    "question": [
+     "How did the 2024 chilli shortage affect gross margin?"
+    ],
+    "answer": [
+     {
+      "format": "SQL",
+      "content": [
+       "SELECT month, CASE WHEN base_spice_code IN ('RCH', 'KCH') THEN 'Chilli' ELSE 'Other spices' END AS spice_group,\n       ROUND(100 * SUM(gross_margin_inr) / SUM(net_revenue_inr), 1) AS gross_margin_pct, ROUND(AVG(raw_material_index), 2) AS raw_material_index\nFROM spiceroute.gold.agg_margin_monthly WHERE month BETWEEN '2024-01-01' AND '2025-06-01' GROUP BY ALL ORDER BY month, spice_group"
+      ]
+     }
+    ]
+   },
+   {
+    "id": "40000000000000000000000000000014",
+    "question": [
+     "What were the top 5 promotions by revenue lift?"
+    ],
+    "answer": [
+     {
+      "format": "SQL",
+      "content": [
+       "SELECT promo_name, channel_code, discount_pct, revenue_lift_pct, discount_cost_inr\nFROM spiceroute.gold.agg_promo_effectiveness WHERE baseline_daily_revenue_inr IS NOT NULL ORDER BY revenue_lift_pct DESC LIMIT 5"
+      ]
+     }
+    ]
+   },
+   {
+    "id": "40000000000000000000000000000015",
+    "question": [
+     "What is the forecast demand for Garam Masala in the North over the next 12 weeks?"
+    ],
+    "answer": [
+     {
+      "format": "SQL",
+      "content": [
+       "SELECT f.week_start, ROUND(SUM(f.forecast_units)) AS forecast_units, ROUND(SUM(f.forecast_lower)) AS lower_80, ROUND(SUM(f.forecast_upper)) AS upper_80\nFROM spiceroute.ml.demand_forecast f JOIN spiceroute.gold.dim_product p ON f.sku_id = p.sku_id\nWHERE p.base_spice = 'Garam Masala' AND f.zone = 'North' GROUP BY f.week_start ORDER BY f.week_start"
+      ]
+     }
+    ]
+   },
+   {
+    "id": "40000000000000000000000000000016",
+    "question": [
+     "What share of revenue comes from online channels each fiscal year?"
+    ],
+    "answer": [
+     {
+      "format": "SQL",
+      "content": [
+       "SELECT `Fiscal Year`, `Channel Group`, ROUND(MEASURE(`Net Revenue`) / 1e7, 2) AS net_revenue_cr\nFROM spiceroute.semantic.sales_metrics GROUP BY ALL ORDER BY `Fiscal Year`, `Channel Group`"
+      ]
+     }
+    ]
+   }
+  ]
+ }
+}
