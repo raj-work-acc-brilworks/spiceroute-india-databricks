@@ -31,7 +31,7 @@ All planned phases are built and deployed in the `brilworks` workspace.
 | 6 | Genie space | ✅ | "Ask SpiceRoute": 16 tables, 3 metric views, 8 example SQL queries (each one tested) and 8 benchmark questions |
 | 7 | Data quality | ✅ | Pipeline expectations and quarantine tables; `gold.dq_summary`; 5-check DQ gate task; 3 SQL alerts (paused) |
 | 8 | Databricks App | ✅ | "Demand Planner" (Streamlit): forecast explorer, reorder approvals saved to `ml.reorder_overrides`, Genie chat |
-| 9 | Orchestration | ✅ | `spiceroute_end_to_end`: one-click manual run, with an optional data rebuild |
+| 9 | Orchestration | ✅ | `spiceroute_end_to_end`: one-click manual run, with an optional data rebuild. Verified 2026-10-05: all tasks SUCCESS, incremental rerun is idempotent (row counts unchanged) |
 | 10 | Docs | ✅ | This README and `PLAN.md` |
 
 ### 🔗 Links
