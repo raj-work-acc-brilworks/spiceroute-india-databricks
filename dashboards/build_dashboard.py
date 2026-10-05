@@ -31,7 +31,7 @@ SELECT o.order_date, o.zone, c.channel_name, c.channel_group, COUNT(*) AS orders
 FROM fact_orders o JOIN dim_channel c ON o.channel_code = c.channel_code
 WHERE o.order_status = 'Delivered'
 GROUP BY ALL""", [
-        ("Orders", "SUM(`orders`)"),
+        ("Total Orders", "SUM(`orders`)"),  # must not share a name with the `orders` column (names are case-insensitive)
         ("AOV", "SUM(`net_revenue_inr`) / SUM(`orders`)"),
     ]),
     "ds_state_map": ("Revenue by state (monthly)", """
@@ -172,9 +172,11 @@ def text(md, x, y, w, h):
     return place({"name": wname("text"), "multilineTextboxSpec": {"lines": [md]}}, x, y, w, h)
 
 
-def counter(ds, title, measure_name, expr, fmt, x, y, w=3, h=3, period=None, desc=None):
+def counter(ds, title, measure_name, expr, fmt, x, y, w=3, h=3, period=None, desc=None, template=None):
     fields = [fld(measure_name, expr)]
     enc = {"value": {"fieldName": measure_name, "displayName": title, "format": fmt}}
+    if template:
+        enc["value"]["formatTemplate"] = template
     if period:
         fields.append(fld(f"monthly({period})", f'DATE_TRUNC("MONTH", `{period}`)'))
         enc["period"] = {"fieldName": f"monthly({period})"}
@@ -250,9 +252,9 @@ L = [
          "Indian fiscal year runs April–March. Use the **Filters** page to slice every page by date, zone, channel and category.", 0, 0, 12, 2),
     counter("ds_sales", "Net Revenue", "measure(Net Revenue)", "MEASURE(`Net Revenue`)", INR, 0, 2, period="order_date"),
     counter("ds_sales", "Gross Margin %", "measure(Gross Margin %)", "MEASURE(`Gross Margin %`)", PCT, 3, 2, period="order_date"),
-    counter("ds_orders", "Orders", "measure(Orders)", "MEASURE(`Orders`)", NUM, 6, 2, period="order_date"),
+    counter("ds_orders", "Orders", "measure(Total Orders)", "MEASURE(`Total Orders`)", NUM, 6, 2, period="order_date"),
     counter("ds_orders", "Avg Order Value", "measure(AOV)", "MEASURE(`AOV`)",
-            {"type": "number-currency", "currencyCode": "INR", "decimalPlaces": {"type": "max", "places": 0}}, 9, 2, period="order_date"),
+            {"type": "number", "decimalPlaces": {"type": "exact", "places": 0}}, 9, 2, period="order_date", template="₹{{ @formatted }}"),
     chart("bar", "ds_sales", "Monthly net revenue by channel group", temporal("monthly(order_date)", "Month"),
           quant("sum(net_revenue_inr)", "Net revenue", INR), [MON("order_date"), SUM("net_revenue_inr"), F("channel_group")],
           0, 5, 8, 6, color={"fieldName": "channel_group", "scale": {"type": "categorical", "mappings": CHANNEL_GROUP_COLORS}, "displayName": "Channel group"},

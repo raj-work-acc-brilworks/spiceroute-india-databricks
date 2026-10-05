@@ -45,7 +45,7 @@
    ],
    "columns": [
     {
-     "displayName": "Orders",
+     "displayName": "Total Orders",
      "expression": "SUM(`orders`)"
     },
     {
@@ -389,8 +389,8 @@
          "datasetName": "ds_orders",
          "fields": [
           {
-           "name": "measure(Orders)",
-           "expression": "MEASURE(`Orders`)"
+           "name": "measure(Total Orders)",
+           "expression": "MEASURE(`Total Orders`)"
           },
           {
            "name": "monthly(order_date)",
@@ -406,7 +406,7 @@
        "widgetType": "counter",
        "encodings": {
         "value": {
-         "fieldName": "measure(Orders)",
+         "fieldName": "measure(Total Orders)",
          "displayName": "Orders",
          "format": {
           "type": "number",
@@ -464,13 +464,13 @@
          "fieldName": "measure(AOV)",
          "displayName": "Avg Order Value",
          "format": {
-          "type": "number-currency",
-          "currencyCode": "INR",
+          "type": "number",
           "decimalPlaces": {
-           "type": "max",
+           "type": "exact",
            "places": 0
           }
-         }
+         },
+         "formatTemplate": "\u20b9{{ @formatted }}"
         },
         "period": {
          "fieldName": "monthly(order_date)"

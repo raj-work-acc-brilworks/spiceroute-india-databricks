@@ -61,6 +61,7 @@ databricks lakeview publish 01f1c0bd2fb31f4fa957edeceee74365 --warehouse-id 9cd4
 - **Dashboard JSON:**
   - bare gold table names, with `ml.`/`bronze.`/`silver.` prefixes for other schemas;
   - `scale.sort` only supports documented values (no `x-reversed`): use query `orders` instead.
+  - a dataset measure (`columns[].displayName`) must not share a name with a column of that dataset; names are case-insensitive, so measure `Orders` vs column `orders` made the tile show "Unable to render visualization".
 - **Forecast accuracy:** at SKU × zone × week the noise floor is about 25% WAPE (bulk distributor orders). Evaluate and plan at base spice × zone (champion is about 17%). Champion selection happens automatically in `train_forecast.py`.
 
 ## Data stories baked into the generator (keep them intact)
