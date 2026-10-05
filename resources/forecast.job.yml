@@ -1,0 +1,42 @@
+resources:
+  experiments:
+    spiceroute_demand_forecast:
+      name: /Users/${workspace.current_user.userName}/spiceroute/demand_forecast
+
+  jobs:
+    spiceroute_forecast:
+      name: spiceroute_forecast
+      description: Prophet weekly demand forecast (SKU x zone) + ai_forecast baseline + warehouse reorder recommendations
+      tags:
+        project: spiceroute
+      max_concurrent_runs: 1
+      parameters:
+        - name: catalog
+          default: ${var.catalog}
+      environments:
+        - environment_key: forecast_env
+          spec:
+            client: "4"
+            dependencies:
+              - prophet==1.1.6
+              - cmdstanpy==1.2.5  # 1.3.x rejects the CmdStan bundled in the prophet wheel (missing makefile)
+              - mlflow-skinny>=2.16
+      tasks:
+        - task_key: train_prophet_forecast
+          environment_key: forecast_env
+          spark_python_task:
+            python_file: ../src/03_forecast/train_forecast.py
+            parameters: ["--catalog", "{{job.parameters.catalog}}", "--experiment", "${resources.experiments.spiceroute_demand_forecast.name}"]
+        - task_key: ai_forecast_baseline
+          sql_task:
+            warehouse_id: ${var.warehouse_id}
+            file:
+              path: ../src/03_forecast/ai_forecast_baseline.sql
+            parameters:
+              catalog: "{{job.parameters.catalog}}"
+        - task_key: reorder_recommendations
+          depends_on: [{task_key: train_prophet_forecast}]
+          environment_key: forecast_env
+          spark_python_task:
+            python_file: ../src/03_forecast/reorder_recommendations.py
+            parameters: ["--catalog", "{{job.parameters.catalog}}"]
