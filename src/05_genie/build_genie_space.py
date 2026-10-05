@@ -35,8 +35,9 @@ TABLES = [
     ("gold.dim_store", "Stores / trade accounts / online storefronts."),
     ("gold.fact_returns", "Product returns with reason."),
     ("gold.fact_purchase_orders", "Purchase orders to spice suppliers incl. quality grade and delays."),
-    ("ml.demand_forecast", "Prophet 12-week weekly unit forecast per SKU x zone (from week of 2026-09-28)."),
-    ("ml.forecast_accuracy", "Backtest accuracy per SKU x zone: WAPE of Prophet vs seasonal naive."),
+    ("ml.demand_forecast", "12-week weekly unit forecast per SKU x zone from the champion model (hierarchical Prophet blended with seasonal naive), from week of 2026-09-28, with calibrated 80% interval."),
+    ("ml.forecast_accuracy", "Backtest accuracy per SKU x zone: wape_model (champion), wape_prophet_sku, wape_seasonal_naive, interval_coverage."),
+    ("ml.forecast_model_comparison", "Backtest WAPE of each candidate forecasting model at SKU x zone and base spice x zone level; is_champion marks the chosen model."),
     ("ml.reorder_recommendation", "Reorder recommendation and stockout risk per DC x SKU as of 2026-09-30."),
 ]
 METRIC_VIEWS = ["semantic.inventory_metrics", "semantic.order_metrics", "semantic.sales_metrics"]
@@ -144,7 +145,9 @@ if __name__ == "__main__":
         if sid:
             cmd = ["databricks", "genie", "update-space", sid, "--json", json.dumps({"serialized_space": ser}), "--profile", PROFILE]
         else:
-            payload = {"title": "Ask SpiceRoute", "warehouse_id": WH, "parent_path": "/Workspace/Users/raj.s@brilworks.com/spiceroute",
+            me = json.loads(subprocess.run(["databricks", "current-user", "me", "--profile", PROFILE, "-o", "json"],
+                                           capture_output=True, text=True).stdout)["userName"]
+            payload = {"title": "Ask SpiceRoute", "warehouse_id": WH, "parent_path": f"/Workspace/Users/{me}/spiceroute",
                        "description": "Ask questions about SpiceRoute India sales, festivals, promotions, margins, inventory and demand forecasts.",
                        "serialized_space": ser}
             cmd = ["databricks", "genie", "create-space", "--json", json.dumps(payload), "--profile", PROFILE, "-o", "json"]

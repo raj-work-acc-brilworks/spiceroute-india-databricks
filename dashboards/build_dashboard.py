@@ -72,19 +72,25 @@ SELECT week_start, zone, category, actual_units, actual_units, actual_units, act
 UNION ALL
 SELECT week_start, zone, category, CAST(NULL AS DOUBLE), forecast_units, forecast_lower, forecast_upper FROM fc""", []),
     "ds_model_compare": ("Next 12 weeks: Prophet vs ai_forecast vs seasonal naive", """
-SELECT f.week_start, f.zone, p.category, SUM(f.forecast_units) AS prophet_units, SUM(f.seasonal_naive_units) AS seasonal_naive_units,
+SELECT f.week_start, f.zone, p.category, SUM(f.forecast_units) AS prophet_units, SUM(f.prophet_sku_units) AS prophet_direct_units,
+       SUM(f.seasonal_naive_units) AS seasonal_naive_units,
        SUM(a.forecast_units) AS ai_forecast_units
 FROM ml.demand_forecast f
 JOIN dim_product p ON f.sku_id = p.sku_id
 LEFT JOIN ml.ai_forecast_baseline a ON a.sku_id = f.sku_id AND a.zone = f.zone AND a.week_start = f.week_start
 GROUP BY ALL""", []),
     "ds_accuracy": ("Backtest accuracy (per series)", """
-SELECT sku_id, zone, category, base_spice, model, actual_units, wape_prophet, wape_seasonal_naive, bias_prophet, interval_coverage,
-       wape_prophet * actual_units AS abs_err_prophet, wape_seasonal_naive * actual_units AS abs_err_snaive
+SELECT sku_id, zone, category, base_spice, model, actual_units, wape_model, wape_prophet_sku, wape_seasonal_naive, bias_model,
+       interval_coverage, wape_model * actual_units AS abs_err_model, wape_prophet_sku * actual_units AS abs_err_prophet,
+       wape_seasonal_naive * actual_units AS abs_err_snaive, interval_coverage * backtest_weeks AS covered_weeks, backtest_weeks
 FROM ml.forecast_accuracy WHERE actual_units > 0""", [
-        ("WAPE Prophet", "SUM(`abs_err_prophet`) / SUM(`actual_units`)"),
+        ("WAPE Model", "SUM(`abs_err_model`) / SUM(`actual_units`)"),
+        ("WAPE Prophet Direct", "SUM(`abs_err_prophet`) / SUM(`actual_units`)"),
+        ("Interval Coverage", "SUM(`covered_weeks`) / SUM(`backtest_weeks`)"),
         ("WAPE Seasonal Naive", "SUM(`abs_err_snaive`) / SUM(`actual_units`)"),
     ]),
+    "ds_candidates": ("Forecast candidate comparison", """
+SELECT level, candidate, wape, is_champion FROM ml.forecast_model_comparison""", []),
     "ds_reorder": ("Reorder recommendations", """
 SELECT r.warehouse_name, w.zone, r.sku_id, r.product_name, base_spice, category, on_hand_units, open_po_units, forecast_next_4w_units,
        weeks_of_cover, lead_time_weeks, safety_stock_units, recommended_order_units, stockout_risk, projected_stockout_date,
@@ -325,34 +331,43 @@ pages.append(("festivals", "3 · Festivals & Promotions", L))
 
 # 4. Demand forecast
 L = [
-    text("## Demand Forecast — next 12 weeks\nProphet per SKU × zone (882 series) with Indian festivals as holidays and promo intensity as a regressor. "
-         "Accuracy from a 3-fold rolling backtest (12 weeks each). Filter by zone and category on the Filters page.", 0, 0, 12, 1),
-    counter("ds_accuracy", "WAPE · Prophet", "measure(WAPE Prophet)", "MEASURE(`WAPE Prophet`)", PCT, 0, 1, 4, 3,
-            desc="Weighted absolute % error in backtest (lower is better)"),
-    counter("ds_accuracy", "WAPE · Seasonal naive", "measure(WAPE Seasonal Naive)", "MEASURE(`WAPE Seasonal Naive`)", PCT, 4, 1, 4, 3,
+    text("## Demand Forecast — next 12 weeks\nProphet with Indian festivals as holidays and promo intensity as a regressor, fitted per **base spice × zone** "
+         "and split to 882 SKU series by recent mix, blended 70/30 with seasonal naive — the champion of 6 candidates in a 3 × 12-week rolling backtest. "
+         "Intervals are split-conformal (calibrated on backtest errors).", 0, 0, 12, 2),
+    counter("ds_accuracy", "WAPE · champion model", "measure(WAPE Model)", "MEASURE(`WAPE Model`)", PCT, 0, 2, 3, 3,
+            desc="SKU x zone x week backtest error (lower is better)"),
+    counter("ds_accuracy", "WAPE · Seasonal naive", "measure(WAPE Seasonal Naive)", "MEASURE(`WAPE Seasonal Naive`)", PCT, 3, 2, 3, 3,
             desc="Same week last year baseline"),
-    counter("ds_model_compare", "Forecast units (next 12 wks)", "sum(prophet_units)", "SUM(`prophet_units`)", NUM, 8, 1, 4, 3),
+    counter("ds_accuracy", "80% interval coverage", "measure(Interval Coverage)", "MEASURE(`Interval Coverage`)", PCT, 6, 2, 3, 3,
+            desc="Share of backtest weeks inside the interval (target ~80%)"),
+    counter("ds_model_compare", "Forecast units (next 12 wks)", "sum(prophet_units)", "SUM(`prophet_units`)", NUM, 9, 2, 3, 3),
     place({"name": wname("forecast"), "queries": q("ds_forecast", [
         F("week_start"), SUM("actual_units"), SUM("forecast_units"), SUM("forecast_lower"), SUM("forecast_upper")]),
-        "spec": {"version": 1, "widgetType": "forecast-line", "frame": {"title": "Weekly units — actuals + Prophet forecast (80% interval)", "showTitle": True},
+        "spec": {"version": 1, "widgetType": "forecast-line", "frame": {"title": "Weekly units — actuals + champion forecast (calibrated 80% interval)", "showTitle": True},
                  "encodings": {"x": {"fieldName": "week_start", "scale": {"type": "temporal"}},
                                "y": {"scale": {"type": "quantitative", "domainMin": 0},
                                      "original": {"fieldName": "sum(actual_units)", "displayName": "Actual units"},
                                      "prediction": {"fieldName": "sum(forecast_units)", "displayName": "Forecast"},
                                      "predictionUpper": {"fieldName": "sum(forecast_upper)"},
                                      "predictionLower": {"fieldName": "sum(forecast_lower)"}}},
-                 "annotations": [vline("2026-11-08", "Diwali 2026", "#6A4C93")]}}, 0, 4, 12, 7),
+                 "annotations": [vline("2026-11-08", "Diwali 2026", "#6A4C93")]}}, 0, 5, 12, 7),
     chart("line", "ds_model_compare", "Model comparison over the horizon", temporal("week_start", "Week"),
           {"scale": {"type": "quantitative"}, "fields": [
-              {"fieldName": "sum(prophet_units)", "displayName": "Prophet"},
+              {"fieldName": "sum(prophet_units)", "displayName": "Champion (hierarchical)"},
+              {"fieldName": "sum(prophet_direct_units)", "displayName": "Prophet direct (SKU)"},
               {"fieldName": "sum(ai_forecast_units)", "displayName": "ai_forecast()"},
               {"fieldName": "sum(seasonal_naive_units)", "displayName": "Seasonal naive"}]},
-          [F("week_start"), SUM("prophet_units"), SUM("ai_forecast_units"), SUM("seasonal_naive_units")], 0, 11, 6, 6),
+          [F("week_start"), SUM("prophet_units"), SUM("prophet_direct_units"), SUM("ai_forecast_units"), SUM("seasonal_naive_units")], 0, 12, 6, 6),
     chart("bar", "ds_accuracy", "Backtest WAPE by category", cat("category", "Category"),
           {"scale": {"type": "quantitative"}, "fields": [
-              {"fieldName": "measure(WAPE Prophet)", "displayName": "Prophet", "format": PCT},
+              {"fieldName": "measure(WAPE Model)", "displayName": "Champion", "format": PCT},
+              {"fieldName": "measure(WAPE Prophet Direct)", "displayName": "Prophet direct", "format": PCT},
               {"fieldName": "measure(WAPE Seasonal Naive)", "displayName": "Seasonal naive", "format": PCT}]},
-          [F("category"), M("WAPE Prophet"), M("WAPE Seasonal Naive")], 6, 11, 6, 6, mark={"layout": "group"}),
+          [F("category"), M("WAPE Model"), M("WAPE Prophet Direct"), M("WAPE Seasonal Naive")], 6, 12, 6, 6, mark={"layout": "group"}),
+    table("ds_candidates", "Candidate models — backtest WAPE", [
+        {"fieldName": "level", "displayName": "Evaluated at"}, {"fieldName": "candidate", "displayName": "Candidate"},
+        {"fieldName": "wape", "displayName": "WAPE", "format": PCT}, {"fieldName": "is_champion", "displayName": "Champion"}],
+        0, 18, 12, 6, orders=[{"direction": "ASC", "expression": "`level`"}, {"direction": "ASC", "expression": "`wape`"}]),
 ]
 pages.append(("forecast", "4 · Demand Forecast", L))
 

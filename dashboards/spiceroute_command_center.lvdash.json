@@ -120,7 +120,8 @@
    "name": "ds_model_compare",
    "displayName": "Next 12 weeks: Prophet vs ai_forecast vs seasonal naive",
    "queryLines": [
-    "SELECT f.week_start, f.zone, p.category, SUM(f.forecast_units) AS prophet_units, SUM(f.seasonal_naive_units) AS seasonal_naive_units,\n",
+    "SELECT f.week_start, f.zone, p.category, SUM(f.forecast_units) AS prophet_units, SUM(f.prophet_sku_units) AS prophet_direct_units,\n",
+    "       SUM(f.seasonal_naive_units) AS seasonal_naive_units,\n",
     "       SUM(a.forecast_units) AS ai_forecast_units\n",
     "FROM ml.demand_forecast f\n",
     "JOIN dim_product p ON f.sku_id = p.sku_id\n",
@@ -132,19 +133,35 @@
    "name": "ds_accuracy",
    "displayName": "Backtest accuracy (per series)",
    "queryLines": [
-    "SELECT sku_id, zone, category, base_spice, model, actual_units, wape_prophet, wape_seasonal_naive, bias_prophet, interval_coverage,\n",
-    "       wape_prophet * actual_units AS abs_err_prophet, wape_seasonal_naive * actual_units AS abs_err_snaive\n",
+    "SELECT sku_id, zone, category, base_spice, model, actual_units, wape_model, wape_prophet_sku, wape_seasonal_naive, bias_model,\n",
+    "       interval_coverage, wape_model * actual_units AS abs_err_model, wape_prophet_sku * actual_units AS abs_err_prophet,\n",
+    "       wape_seasonal_naive * actual_units AS abs_err_snaive, interval_coverage * backtest_weeks AS covered_weeks, backtest_weeks\n",
     "FROM ml.forecast_accuracy WHERE actual_units > 0\n"
    ],
    "columns": [
     {
-     "displayName": "WAPE Prophet",
+     "displayName": "WAPE Model",
+     "expression": "SUM(`abs_err_model`) / SUM(`actual_units`)"
+    },
+    {
+     "displayName": "WAPE Prophet Direct",
      "expression": "SUM(`abs_err_prophet`) / SUM(`actual_units`)"
+    },
+    {
+     "displayName": "Interval Coverage",
+     "expression": "SUM(`covered_weeks`) / SUM(`backtest_weeks`)"
     },
     {
      "displayName": "WAPE Seasonal Naive",
      "expression": "SUM(`abs_err_snaive`) / SUM(`actual_units`)"
     }
+   ]
+  },
+  {
+   "name": "ds_candidates",
+   "displayName": "Forecast candidate comparison",
+   "queryLines": [
+    "SELECT level, candidate, wape, is_champion FROM ml.forecast_model_comparison\n"
    ]
   },
   {
@@ -1741,7 +1758,7 @@
       "name": "text-21",
       "multilineTextboxSpec": {
        "lines": [
-        "## Demand Forecast \u2014 next 12 weeks\nProphet per SKU \u00d7 zone (882 series) with Indian festivals as holidays and promo intensity as a regressor. Accuracy from a 3-fold rolling backtest (12 weeks each). Filter by zone and category on the Filters page."
+        "## Demand Forecast \u2014 next 12 weeks\nProphet with Indian festivals as holidays and promo intensity as a regressor, fitted per **base spice \u00d7 zone** and split to 882 SKU series by recent mix, blended 70/30 with seasonal naive \u2014 the champion of 6 candidates in a 3 \u00d7 12-week rolling backtest. Intervals are split-conformal (calibrated on backtest errors)."
        ]
       }
      },
@@ -1749,7 +1766,7 @@
       "x": 0,
       "y": 0,
       "width": 12,
-      "height": 1
+      "height": 2
      }
     },
     {
@@ -1762,8 +1779,8 @@
          "datasetName": "ds_accuracy",
          "fields": [
           {
-           "name": "measure(WAPE Prophet)",
-           "expression": "MEASURE(`WAPE Prophet`)"
+           "name": "measure(WAPE Model)",
+           "expression": "MEASURE(`WAPE Model`)"
           }
          ],
          "disaggregated": false
@@ -1775,8 +1792,8 @@
        "widgetType": "counter",
        "encodings": {
         "value": {
-         "fieldName": "measure(WAPE Prophet)",
-         "displayName": "WAPE \u00b7 Prophet",
+         "fieldName": "measure(WAPE Model)",
+         "displayName": "WAPE \u00b7 champion model",
          "format": {
           "type": "number-percent",
           "decimalPlaces": {
@@ -1787,17 +1804,17 @@
         }
        },
        "frame": {
-        "title": "WAPE \u00b7 Prophet",
+        "title": "WAPE \u00b7 champion model",
         "showTitle": true,
         "showDescription": true,
-        "description": "Weighted absolute % error in backtest (lower is better)"
+        "description": "SKU x zone x week backtest error (lower is better)"
        }
       }
      },
      "position": {
       "x": 0,
-      "y": 1,
-      "width": 4,
+      "y": 2,
+      "width": 3,
       "height": 3
      }
     },
@@ -1844,15 +1861,64 @@
       }
      },
      "position": {
-      "x": 4,
-      "y": 1,
-      "width": 4,
+      "x": 3,
+      "y": 2,
+      "width": 3,
       "height": 3
      }
     },
     {
      "widget": {
       "name": "kpi-24",
+      "queries": [
+       {
+        "name": "main_query",
+        "query": {
+         "datasetName": "ds_accuracy",
+         "fields": [
+          {
+           "name": "measure(Interval Coverage)",
+           "expression": "MEASURE(`Interval Coverage`)"
+          }
+         ],
+         "disaggregated": false
+        }
+       }
+      ],
+      "spec": {
+       "version": 2,
+       "widgetType": "counter",
+       "encodings": {
+        "value": {
+         "fieldName": "measure(Interval Coverage)",
+         "displayName": "80% interval coverage",
+         "format": {
+          "type": "number-percent",
+          "decimalPlaces": {
+           "type": "max",
+           "places": 1
+          }
+         }
+        }
+       },
+       "frame": {
+        "title": "80% interval coverage",
+        "showTitle": true,
+        "showDescription": true,
+        "description": "Share of backtest weeks inside the interval (target ~80%)"
+       }
+      }
+     },
+     "position": {
+      "x": 6,
+      "y": 2,
+      "width": 3,
+      "height": 3
+     }
+    },
+    {
+     "widget": {
+      "name": "kpi-25",
       "queries": [
        {
         "name": "main_query",
@@ -1892,15 +1958,15 @@
       }
      },
      "position": {
-      "x": 8,
-      "y": 1,
-      "width": 4,
+      "x": 9,
+      "y": 2,
+      "width": 3,
       "height": 3
      }
     },
     {
      "widget": {
-      "name": "forecast-25",
+      "name": "forecast-26",
       "queries": [
        {
         "name": "main_query",
@@ -1936,7 +2002,7 @@
        "version": 1,
        "widgetType": "forecast-line",
        "frame": {
-        "title": "Weekly units \u2014 actuals + Prophet forecast (80% interval)",
+        "title": "Weekly units \u2014 actuals + champion forecast (calibrated 80% interval)",
         "showTitle": true
        },
        "encodings": {
@@ -1990,14 +2056,14 @@
      },
      "position": {
       "x": 0,
-      "y": 4,
+      "y": 5,
       "width": 12,
       "height": 7
      }
     },
     {
      "widget": {
-      "name": "line-26",
+      "name": "line-27",
       "queries": [
        {
         "name": "main_query",
@@ -2011,6 +2077,10 @@
           {
            "name": "sum(prophet_units)",
            "expression": "SUM(`prophet_units`)"
+          },
+          {
+           "name": "sum(prophet_direct_units)",
+           "expression": "SUM(`prophet_direct_units`)"
           },
           {
            "name": "sum(ai_forecast_units)",
@@ -2043,7 +2113,11 @@
          "fields": [
           {
            "fieldName": "sum(prophet_units)",
-           "displayName": "Prophet"
+           "displayName": "Champion (hierarchical)"
+          },
+          {
+           "fieldName": "sum(prophet_direct_units)",
+           "displayName": "Prophet direct (SKU)"
           },
           {
            "fieldName": "sum(ai_forecast_units)",
@@ -2064,14 +2138,14 @@
      },
      "position": {
       "x": 0,
-      "y": 11,
+      "y": 12,
       "width": 6,
       "height": 6
      }
     },
     {
      "widget": {
-      "name": "bar-27",
+      "name": "bar-28",
       "queries": [
        {
         "name": "main_query",
@@ -2083,8 +2157,12 @@
            "expression": "`category`"
           },
           {
-           "name": "measure(WAPE Prophet)",
-           "expression": "MEASURE(`WAPE Prophet`)"
+           "name": "measure(WAPE Model)",
+           "expression": "MEASURE(`WAPE Model`)"
+          },
+          {
+           "name": "measure(WAPE Prophet Direct)",
+           "expression": "MEASURE(`WAPE Prophet Direct`)"
           },
           {
            "name": "measure(WAPE Seasonal Naive)",
@@ -2112,8 +2190,19 @@
          },
          "fields": [
           {
-           "fieldName": "measure(WAPE Prophet)",
-           "displayName": "Prophet",
+           "fieldName": "measure(WAPE Model)",
+           "displayName": "Champion",
+           "format": {
+            "type": "number-percent",
+            "decimalPlaces": {
+             "type": "max",
+             "places": 1
+            }
+           }
+          },
+          {
+           "fieldName": "measure(WAPE Prophet Direct)",
+           "displayName": "Prophet direct",
            "format": {
             "type": "number-percent",
             "decimalPlaces": {
@@ -2147,8 +2236,91 @@
      },
      "position": {
       "x": 6,
-      "y": 11,
+      "y": 12,
       "width": 6,
+      "height": 6
+     }
+    },
+    {
+     "widget": {
+      "name": "table-29",
+      "queries": [
+       {
+        "name": "main_query",
+        "query": {
+         "datasetName": "ds_candidates",
+         "fields": [
+          {
+           "name": "level",
+           "expression": "`level`"
+          },
+          {
+           "name": "candidate",
+           "expression": "`candidate`"
+          },
+          {
+           "name": "wape",
+           "expression": "`wape`"
+          },
+          {
+           "name": "is_champion",
+           "expression": "`is_champion`"
+          }
+         ],
+         "disaggregated": true,
+         "orders": [
+          {
+           "direction": "ASC",
+           "expression": "`level`"
+          },
+          {
+           "direction": "ASC",
+           "expression": "`wape`"
+          }
+         ]
+        }
+       }
+      ],
+      "spec": {
+       "version": 2,
+       "widgetType": "table",
+       "encodings": {
+        "columns": [
+         {
+          "fieldName": "level",
+          "displayName": "Evaluated at"
+         },
+         {
+          "fieldName": "candidate",
+          "displayName": "Candidate"
+         },
+         {
+          "fieldName": "wape",
+          "displayName": "WAPE",
+          "format": {
+           "type": "number-percent",
+           "decimalPlaces": {
+            "type": "max",
+            "places": 1
+           }
+          }
+         },
+         {
+          "fieldName": "is_champion",
+          "displayName": "Champion"
+         }
+        ]
+       },
+       "frame": {
+        "title": "Candidate models \u2014 backtest WAPE",
+        "showTitle": true
+       }
+      }
+     },
+     "position": {
+      "x": 0,
+      "y": 18,
+      "width": 12,
       "height": 6
      }
     }
@@ -2162,7 +2334,7 @@
    "layout": [
     {
      "widget": {
-      "name": "text-28",
+      "name": "text-30",
       "multilineTextboxSpec": {
        "lines": [
         "## Inventory & Supply\nThe **2024 Andhra/Telangana chilli crop failure** (Jun\u2013Oct 2024) is visible here: refused supplier allocations, a low-grade alternate supplier, stockouts in South/West DCs, and a margin squeeze until the July 2024 MRP increase."
@@ -2178,7 +2350,7 @@
     },
     {
      "widget": {
-      "name": "kpi-29",
+      "name": "kpi-31",
       "queries": [
        {
         "name": "main_query",
@@ -2225,7 +2397,7 @@
     },
     {
      "widget": {
-      "name": "kpi-30",
+      "name": "kpi-32",
       "queries": [
        {
         "name": "main_query",
@@ -2275,7 +2447,7 @@
     },
     {
      "widget": {
-      "name": "kpi-31",
+      "name": "kpi-33",
       "queries": [
        {
         "name": "main_query",
@@ -2323,7 +2495,7 @@
     },
     {
      "widget": {
-      "name": "line-32",
+      "name": "line-34",
       "queries": [
        {
         "name": "main_query",
@@ -2424,7 +2596,7 @@
     },
     {
      "widget": {
-      "name": "line-33",
+      "name": "line-35",
       "queries": [
        {
         "name": "main_query",
@@ -2525,7 +2697,7 @@
     },
     {
      "widget": {
-      "name": "bar-34",
+      "name": "bar-36",
       "queries": [
        {
         "name": "main_query",
@@ -2608,7 +2780,7 @@
     },
     {
      "widget": {
-      "name": "table-35",
+      "name": "table-37",
       "queries": [
        {
         "name": "main_query",
@@ -2718,7 +2890,7 @@
     },
     {
      "widget": {
-      "name": "table-36",
+      "name": "table-38",
       "queries": [
        {
         "name": "main_query",
@@ -2902,7 +3074,7 @@
    "layout": [
     {
      "widget": {
-      "name": "text-37",
+      "name": "text-39",
       "multilineTextboxSpec": {
        "lines": [
         "## Customers & Data Health\nRFM segments for identified consumers (D2C, marketplace, quick commerce, loyalty). Data-quality issues injected at source are caught by pipeline expectations and quarantined."
@@ -2918,7 +3090,7 @@
     },
     {
      "widget": {
-      "name": "bar-38",
+      "name": "bar-40",
       "queries": [
        {
         "name": "main_query",
@@ -2986,7 +3158,7 @@
     },
     {
      "widget": {
-      "name": "bar-39",
+      "name": "bar-41",
       "queries": [
        {
         "name": "main_query",
@@ -3060,7 +3232,7 @@
     },
     {
      "widget": {
-      "name": "bar-40",
+      "name": "bar-42",
       "queries": [
        {
         "name": "main_query",
@@ -3122,7 +3294,7 @@
     },
     {
      "widget": {
-      "name": "bar-41",
+      "name": "bar-43",
       "queries": [
        {
         "name": "main_query",
@@ -3213,7 +3385,7 @@
    "layout": [
     {
      "widget": {
-      "name": "filter-42",
+      "name": "filter-44",
       "queries": [
        {
         "name": "f_ds_sales_order_date",
@@ -3306,7 +3478,7 @@
     },
     {
      "widget": {
-      "name": "filter-43",
+      "name": "filter-45",
       "queries": [
        {
         "name": "f_ds_sales_zone",
@@ -3518,7 +3690,7 @@
     },
     {
      "widget": {
-      "name": "filter-44",
+      "name": "filter-46",
       "queries": [
        {
         "name": "f_ds_sales_channel_name",
@@ -3611,7 +3783,7 @@
     },
     {
      "widget": {
-      "name": "filter-45",
+      "name": "filter-47",
       "queries": [
        {
         "name": "f_ds_sales_category",
@@ -3772,7 +3944,7 @@
     },
     {
      "widget": {
-      "name": "filter-46",
+      "name": "filter-48",
       "queries": [
        {
         "name": "f_ds_reorder_stockout_risk",
@@ -3814,7 +3986,7 @@
     },
     {
      "widget": {
-      "name": "filter-47",
+      "name": "filter-49",
       "queries": [
        {
         "name": "f_ds_festival_festival_name",
@@ -3856,7 +4028,7 @@
     },
     {
      "widget": {
-      "name": "filter-48",
+      "name": "filter-50",
       "queries": [
        {
         "name": "f_ds_sales_fiscal_year",
@@ -3898,7 +4070,7 @@
     },
     {
      "widget": {
-      "name": "filter-49",
+      "name": "filter-51",
       "queries": [
        {
         "name": "f_ds_reorder_warehouse_name",

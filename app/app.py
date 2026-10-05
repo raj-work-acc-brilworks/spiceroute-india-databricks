@@ -52,7 +52,7 @@ def current_user():
 
 
 st.title("🌶️ SpiceRoute Demand Planner")
-st.caption(f"Actuals to 30 Sep 2026 · 12-week Prophet forecast · catalog `{CAT}` · signed in as {current_user()}")
+st.caption(f"Actuals to 30 Sep 2026 · 12-week demand forecast · catalog `{CAT}` · signed in as {current_user()}")
 
 tab_fc, tab_ro, tab_genie = st.tabs(["📈 Forecast explorer", "📦 Reorder planner", "💬 Ask Genie"])
 
@@ -81,7 +81,7 @@ with tab_fc:
         LEFT JOIN {CAT}.ml.ai_forecast_baseline a ON a.sku_id = f.sku_id AND a.zone = f.zone AND a.week_start = f.week_start
         WHERE f.zone = :z AND p.base_spice = :s {sku_filter} GROUP BY 1 ORDER BY 1""", params)
     acc = query(f"""
-        SELECT SUM(a.wape_prophet * a.actual_units) / SUM(a.actual_units) AS wape_prophet,
+        SELECT SUM(a.wape_model * a.actual_units) / SUM(a.actual_units) AS wape_model,
                SUM(a.wape_seasonal_naive * a.actual_units) / SUM(a.actual_units) AS wape_snaive
         FROM {CAT}.ml.forecast_accuracy a JOIN {CAT}.gold.dim_product p ON a.sku_id = p.sku_id
         WHERE a.zone = :z AND p.base_spice = :s {sku_filter}""", params)
@@ -89,20 +89,21 @@ with tab_fc:
     m1, m2, m3, m4 = st.columns(4)
     m1.metric("Next 4 weeks (units)", f"{fc['prophet'].head(5).tail(4).sum():,.0f}")
     m2.metric("Next 12 weeks (units)", f"{fc['prophet'].sum():,.0f}")
-    if not acc.empty and acc["wape_prophet"].notna().all():
-        m3.metric("Backtest WAPE · Prophet", f"{acc['wape_prophet'][0]:.1%}")
+    if not acc.empty and acc["wape_model"].notna().all():
+        m3.metric("Backtest WAPE · champion model", f"{acc['wape_model'][0]:.1%}")
         m4.metric("Backtest WAPE · seasonal naive", f"{acc['wape_snaive'][0]:.1%}",
-                  delta=f"{(acc['wape_snaive'][0] - acc['wape_prophet'][0]):.1%} better" if acc['wape_prophet'][0] < acc['wape_snaive'][0] else None)
+                  delta=f"{(acc['wape_snaive'][0] - acc['wape_model'][0]):.1%} worse than champion" if acc['wape_model'][0] < acc['wape_snaive'][0] else None,
+                  delta_color="inverse")
 
     long = pd.concat([
         actual.rename(columns={"units": "value"}).assign(series="Actual"),
-        fc[["week_start", "prophet"]].rename(columns={"prophet": "value"}).assign(series="Prophet forecast"),
+        fc[["week_start", "prophet"]].rename(columns={"prophet": "value"}).assign(series="Champion forecast"),
         fc[["week_start", "ai_forecast"]].rename(columns={"ai_forecast": "value"}).assign(series="ai_forecast()"),
         fc[["week_start", "seasonal_naive"]].rename(columns={"seasonal_naive": "value"}).assign(series="Seasonal naive"),
     ])
     long["week_start"] = pd.to_datetime(long["week_start"])
     fc_band = fc.assign(week_start=pd.to_datetime(fc["week_start"]))
-    colors = alt.Scale(domain=["Actual", "Prophet forecast", "ai_forecast()", "Seasonal naive"],
+    colors = alt.Scale(domain=["Actual", "Champion forecast", "ai_forecast()", "Seasonal naive"],
                        range=["#264653", "#B23A48", "#2A9D8F", "#B0A89E"])
     band = alt.Chart(fc_band).mark_area(opacity=0.18, color="#B23A48").encode(x="week_start:T", y="lower:Q", y2="upper:Q")
     lines = alt.Chart(long.dropna()).mark_line(point=True).encode(
@@ -110,8 +111,9 @@ with tab_fc:
         color=alt.Color("series:N", scale=colors, title=None),
         strokeDash=alt.condition(alt.datum.series == "Actual", alt.value([1, 0]), alt.value([5, 3])),
         tooltip=["series", "week_start:T", alt.Tooltip("value:Q", format=",.0f")])
-    st.altair_chart((band + lines).properties(height=380), use_container_width=True)
-    st.caption("Shaded band = Prophet 80% interval. Diwali 2026 falls on 8 Nov (week of 2 Nov).")
+    st.altair_chart((band + lines).properties(height=380), width="stretch")
+    st.caption("Champion = Prophet per base spice × zone, split to SKUs by recent mix, blended 70/30 with seasonal naive. "
+               "Shaded band = calibrated 80% interval. Diwali 2026 falls on 8 Nov (week of 2 Nov).")
 
 # ---------------------------------------------------------------- reorder planner
 with tab_ro:
@@ -142,7 +144,7 @@ with tab_ro:
                                          "forecast_next_4w_units", "weeks_of_cover", "recommended_order_units",
                                          "projected_stockout_date", "decision", "override_units", "comment"]]
         edited = st.data_editor(
-            edit, hide_index=True, use_container_width=True, key="ro_editor",
+            edit, hide_index=True, width="stretch", key="ro_editor",
             disabled=[c for c in edit.columns if c not in ("decision", "override_units", "comment")],
             column_config={
                 "decision": st.column_config.SelectboxColumn("Decision", options=["", "Approved", "Modified", "Rejected"]),
@@ -193,7 +195,7 @@ with tab_genie:
                         res = w.genie.get_message_attachment_query_result(GENIE_SPACE_ID, msg.conversation_id, msg.id, att.attachment_id)
                         sr = res.statement_response
                         cols = [c.name for c in sr.manifest.schema.columns]
-                        st.dataframe(pd.DataFrame(sr.result.data_array or [], columns=cols), hide_index=True, use_container_width=True)
+                        st.dataframe(pd.DataFrame(sr.result.data_array or [], columns=cols), hide_index=True, width="stretch")
                         with st.expander("Generated SQL"):
                             st.code(att.query.query, language="sql")
             except Exception as e:  # surface API problems to the user rather than crashing the app

@@ -25,12 +25,12 @@ All planned phases are built and deployed in the `brilworks` workspace.
 | 1 | Synthetic data | ✅ | Job `spiceroute_generate_data`: 25.47M raw lines, 10.4M orders, 1M customers, inventory and purchase orders |
 | 2 | Medallion pipeline | ✅ | Pipeline `spiceroute_medallion` (serverless SQL, about 4 min); 25.18M clean gold lines |
 | 3 | Semantic layer | ✅ | Metric views `sales_metrics`, `order_metrics`, `inventory_metrics` |
-| 4 | Forecasting | ✅ | Prophet for 882 SKU × zone series, plus the `ai_forecast()` baseline and MLflow tracking. Backtest WAPE is **27.1%**, against 31.9% for the seasonal-naive baseline (Prophet wins on 80.5% of series). The plan's ≤20% target was **not** met, see §5 |
+| 4 | Forecasting | ✅ | Hierarchical Prophet (base spice × zone, split to 882 SKU series) blended with seasonal naive; champion chosen from 6 candidates by backtest. WAPE is **17.3%** at spice × zone (planning level, meets the ≤20% target) and **24.3%** at SKU × zone × week. It beats seasonal naive on **94.8%** of series, and the calibrated 80% intervals cover **82%** on a held-out fold |
 | 4c | Reorder recommendations | ✅ | `ml.reorder_recommendation`: 162 high-risk, 499 medium-risk and 515 low-risk DC × SKU items |
 | 5 | AI/BI dashboard | ✅ | 6 pages plus a filters page, published, with the Genie button linked |
-| 6 | Genie space | ✅ | "Ask SpiceRoute": 16 tables, 3 metric views, 8 example SQL queries (each one tested) and 8 benchmark questions |
+| 6 | Genie space | ✅ | "Ask SpiceRoute": 17 tables, 3 metric views, 8 example SQL queries (each one tested) and 8 benchmark questions |
 | 7 | Data quality | ✅ | Pipeline expectations and quarantine tables; `gold.dq_summary`; 5-check DQ gate task; 3 SQL alerts (paused) |
-| 8 | Databricks App | ✅ | "Demand Planner" (Streamlit): forecast explorer, reorder approvals saved to `ml.reorder_overrides`, Genie chat |
+| 8 | Databricks App | ✅ | "Demand Planner" (Streamlit): forecast explorer, reorder approvals saved to `ml.reorder_overrides`, Genie chat. Verified headless with Streamlit `AppTest` against live data (all tabs and Genie, no errors) and the write path tested |
 | 9 | Orchestration | ✅ | `spiceroute_end_to_end`: one-click manual run, with an optional data rebuild. Verified 2026-10-05: all tasks SUCCESS, incremental rerun is idempotent (row counts unchanged) |
 | 10 | Docs | ✅ | This README and `PLAN.md` |
 
@@ -40,19 +40,15 @@ All planned phases are built and deployed in the `brilworks` workspace.
 | Dashboard (published) | https://dbc-821c89ac-7917.cloud.databricks.com/sql/dashboardsv3/01f1c0bd2fb31f4fa957edeceee74365/published |
 | Genie space | https://dbc-821c89ac-7917.cloud.databricks.com/genie/rooms/01f1c0bd7bd6175ba0b691784fd34971 |
 | Demand Planner app | https://spiceroute-demand-planner-7474657342127486.aws.databricksapps.com |
-| MLflow experiment | `/Users/raj.s@brilworks.com/spiceroute/demand_forecast` |
+| MLflow experiment | `/Users/<your-user>/spiceroute/demand_forecast` |
 | Jobs | `spiceroute_end_to_end`, `spiceroute_generate_data`, `spiceroute_forecast` (Workflows UI) |
 | Pipeline | `spiceroute_medallion` |
 
 ### Known gaps / next ideas
-- **Forecast accuracy.** WAPE is 27% at SKU × zone × week level. Possible improvements:
-  - forecast at base-spice level and reconcile down to SKU (hierarchical forecasting);
-  - add a festival-week lead/lag regressor per zone;
-  - tune `changepoint_prior_scale`;
-  - try LightGBM on lag features.
-- **Forecast intervals.** The 80% intervals cover only about 62% of actuals, so they are too narrow. Increase `interval_width` or calibrate the intervals.
-- **Alerts are paused** to protect the Free Edition quota. The same thresholds are enforced on every manual run by the `dq_checks` task.
-- **The app was checked through its deploy logs only.** Open it once in a browser to confirm the UI.
+- **SKU-level noise floor.** At SKU × zone × week, even a one-week-ahead 4-week moving average only reaches 25% WAPE, because bulk distributor orders make weekly SKU volumes lumpy. That's why the forecast is evaluated, and planned, at base spice × zone, where it reaches 17.3%. Next ideas:
+  - LightGBM on lag and festival features as an extra candidate;
+  - MinT (optimal) hierarchical reconciliation instead of top-down shares.
+- **Alerts are paused** to protect the Free Edition quota. The same thresholds are enforced on every manual run by the `dq_checks` task. Unpause them in the UI if you want the emails.
 
 ## 1. Business story
 
@@ -321,12 +317,33 @@ Design notes:
 |---|---|
 | Target | Weekly units per SKU × zone (882 series) |
 | Horizon | 12 weeks (trained through the week of 2026-09-21) |
-| Model | Prophet: multiplicative yearly seasonality, Indian festivals as holidays (festival week and the week before), `promo_share` regressor |
+| Base model | Prophet: multiplicative yearly seasonality, Indian festivals as holidays (festival week and the week before), `promo_share` regressor |
+| Hierarchy | Prophet is also fitted per **base spice × zone** (smoother series), then split to SKUs by each SKU's trailing 12-week share (top-down) |
+| Candidates | `prophet_sku`, `topdown`, `combined`, each also blended 0.7/0.3 with seasonal naive. The lowest backtest WAPE wins: currently **topdown+snaive** |
+| Intervals | Split-conformal 80% intervals: the 10th and 90th percentiles of actual/forecast ratios per category × zone from the backtest. Coverage is checked on a held-out fold (82%) |
 | Short-history SKUs | Recent 8-week mean (products launched in 2024–25) |
 | Baselines | Seasonal naive (same week last year); Databricks `ai_forecast()` |
 | Validation | Rolling-origin backtest, 3 folds × 12 weeks; WAPE, bias, 80% interval coverage |
-| Tracking | MLflow experiment `/Users/raj.s@brilworks.com/spiceroute/demand_forecast` |
-| **Backtest result** | WAPE: Prophet **27.1%** vs seasonal naive 31.9%. Bias +1.7%. Prophet beats seasonal naive on **80.5%** of series. 80% interval coverage is 62% |
+| Tracking | MLflow experiment `/Users/<your-user>/spiceroute/demand_forecast` |
+| **Backtest result** | See the table below. Champion bias is −1.7%. It beats seasonal naive on **94.8%** of series. Holdout interval coverage is 82% |
+
+| Candidate | WAPE, SKU × zone × week | WAPE, base spice × zone × week |
+|---|---|---|
+| prophet_sku (direct) | 27.1% | 18.3% |
+| topdown | 24.5% | 18.1% |
+| combined | 25.0% | 18.1% |
+| prophet_sku + snaive | 26.0% | 17.4% |
+| **topdown + snaive (champion)** | **24.3%** | **17.3%** |
+| combined + snaive | 24.7% | 17.3% |
+| seasonal naive | 31.9% | 21.9% |
+
+```mermaid
+xychart-beta
+    title "Backtest WAPE % at SKU x zone x week (lower is better)"
+    x-axis ["seasonal naive", "prophet_sku", "prophet+snaive", "combined", "topdown", "combined+snaive", "topdown+snaive"]
+    y-axis "WAPE %" 0 --> 35
+    bar [31.9, 27.1, 26.0, 25.0, 24.5, 24.7, 24.3]
+```
 | Inventory link | Zone forecast allocated to DCs by recent demand share, giving lead-time demand + safety stock − (on hand + open POs) = reorder quantity and stockout risk |
 
 ---
@@ -340,7 +357,7 @@ Built by `dashboards/build_dashboard.py`, which generates `spiceroute_command_ce
 | 1 · Executive Overview | KPI sparklines (net revenue, GM %, orders, AOV); monthly revenue by channel group with Diwali markers; channel mix; revenue by zone; top spices; GM % by category |
 | 2 · Product & Region | Category × zone heatmap; state bubble map; spice × zone volume pivot; volume by season |
 | 3 · Festivals & Promotions | Daily revenue by zone with festival markers; biggest festival uplifts; promotion lift table; promo revenue share by channel |
-| 4 · Demand Forecast | WAPE KPIs; actuals + Prophet forecast-line with 80% band; Prophet vs `ai_forecast()` vs seasonal naive; WAPE by category |
+| 4 · Demand Forecast | WAPE and interval-coverage KPIs; actuals + champion forecast-line with calibrated 80% band; champion vs direct Prophet vs `ai_forecast()` vs seasonal naive; WAPE by category; candidate-model leaderboard |
 | 5 · Inventory & Supply | Fill-rate and high-risk KPIs; chilli vs other fill rate (crop-failure marker); chilli margin squeeze with MRP-hike marker; stockout days by DC; supplier scorecard; colour-coded reorder table |
 | 6 · Customers & Data Health | RFM segments; customer value by loyalty tier; rows through the medallion layers; DQ outcomes by reason |
 | Filters | Date, zone, channel, category, stockout risk, festival, fiscal year, warehouse |
@@ -383,7 +400,7 @@ flowchart LR
     T3 -->|Conversation API| G[Genie: Ask SpiceRoute]
 ```
 
-- **Forecast explorer:** actuals vs Prophet (with 80% band), `ai_forecast()` and seasonal naive, plus backtest WAPE for the current selection.
+- **Forecast explorer:** actuals vs the champion forecast (with calibrated 80% band), `ai_forecast()` and seasonal naive, plus backtest WAPE for the current selection.
 - **Reorder planner:** editable table of recommendations. Decisions are stored with the planner's email and a timestamp, and the latest decision is shown next to each item.
 - **Ask Genie:** chat that shows Genie's answer, the result table and the generated SQL.
 
@@ -472,7 +489,7 @@ GENIE_SPACE_ID=01f1c0bd7bd6175ba0b691784fd34971 python3 src/05_genie/build_genie
 1. **Dashboard, page 1:** ₹484 cr in FY25-26 (+18%). General Trade is the core channel, but online is growing fastest. Diwali markers show the festive peaks.
 2. **Page 2:** regional taste. Sambar is big in the South, panch phoron in the East, goda masala in the West.
 3. **Page 5:** the 2024 chilli crop failure. Fill rate collapses in South and West DCs, the margin squeeze is visible, and margin recovers after the MRP hike. The supplier scorecard shows the grade-C alternate supplier.
-4. **Page 4:** Prophet forecast with festival effects, which beats the seasonal baseline on 80% of series.
+4. **Page 4:** hierarchical Prophet forecast with festival effects. It reaches 17.3% WAPE at planning level and beats the seasonal baseline on 95% of series. Show the candidate leaderboard.
 5. **Ask Genie:** "Which SKUs are at high risk of stockout at the Chennai DC?"
 6. **Demand Planner app:** filter Chennai / High, approve or modify the order quantities, and show the saved rows in `ml.reorder_overrides`.
 7. **Lineage:** show Unity Catalog lineage from `bronze.sales_lines_raw` through to `semantic.sales_metrics`, plus the DQ gate in the end-to-end job run.

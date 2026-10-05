@@ -46,7 +46,7 @@ Project runs in a **dedicated, empty workspace** — fully separate from the exi
 
 | Check | Result |
 |---|---|
-| CLI profile | **`brilworks`** → `https://dbc-821c89ac-7917.cloud.databricks.com` (user `raj.s@brilworks.com`), authenticated |
+| CLI profile | **`brilworks`** → `https://dbc-821c89ac-7917.cloud.databricks.com` (user `<your-user>`), authenticated |
 | Workspace state | Empty: only `workspace` / `system` / `samples` catalogs, no jobs, no pipelines |
 | Permissions | User is in `admins` group → can create catalog, jobs, pipelines, Genie spaces |
 | SQL warehouse | `Serverless Starter Warehouse` (id `9cd430b8a1739112`, size Small, auto-stop) |
@@ -63,9 +63,9 @@ Because SpiceRoute has its own workspace, its compute quota, warehouse, catalogs
 | Asset | SpiceRoute convention |
 |---|---|
 | Unity Catalog | `spiceroute` catalog with `bronze`, `silver`, `gold`, `ml`, `semantic` schemas |
-| Bundle | `spiceroute_india` → `/Users/raj.s@brilworks.com/.bundle/spiceroute_india/` |
+| Bundle | `spiceroute_india` → `/Users/<your-user>/.bundle/spiceroute_india/` |
 | Jobs / pipelines | Prefixed `spiceroute_`, tagged `project=spiceroute` |
-| MLflow experiment | `/Users/raj.s@brilworks.com/spiceroute/demand_forecast` |
+| MLflow experiment | `/Users/<your-user>/spiceroute/demand_forecast` |
 | Local code | This folder (`db-prac/`) |
 | Teardown | `databricks bundle destroy --profile brilworks` + `DROP CATALOG spiceroute CASCADE` |
 

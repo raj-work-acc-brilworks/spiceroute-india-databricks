@@ -185,13 +185,19 @@
    {
     "identifier": "spiceroute.ml.demand_forecast",
     "description": [
-     "Prophet 12-week weekly unit forecast per SKU x zone (from week of 2026-09-28)."
+     "12-week weekly unit forecast per SKU x zone from the champion model (hierarchical Prophet blended with seasonal naive), from week of 2026-09-28, with calibrated 80% interval."
     ]
    },
    {
     "identifier": "spiceroute.ml.forecast_accuracy",
     "description": [
-     "Backtest accuracy per SKU x zone: WAPE of Prophet vs seasonal naive."
+     "Backtest accuracy per SKU x zone: wape_model (champion), wape_prophet_sku, wape_seasonal_naive, interval_coverage."
+    ]
+   },
+   {
+    "identifier": "spiceroute.ml.forecast_model_comparison",
+    "description": [
+     "Backtest WAPE of each candidate forecasting model at SKU x zone and base spice x zone level; is_champion marks the chosen model."
     ]
    },
    {

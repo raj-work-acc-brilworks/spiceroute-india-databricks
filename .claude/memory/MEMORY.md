@@ -1,0 +1,2 @@
+- [SpiceRoute project](spiceroute-project.md) — Databricks bundle in db-prac: profile brilworks, catalog spiceroute, asset IDs, GitHub repo
+- [No Claude attribution](no-claude-attribution.md) — never add Claude co-author lines to commits/PRs/files here
